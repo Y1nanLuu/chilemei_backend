@@ -1,70 +1,118 @@
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import case, func
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
 from app.models.comment import Comment
-from app.models.enums import ReactionType, ReviewSentiment
+from app.models.enums import ReviewSentiment
+from app.models.food import Food
 from app.models.food_record import FoodRecord
-from app.models.reaction import FoodReaction
 from app.models.user import User
-from app.schemas.food import FoodRankingItem, FoodRecordCreate, FoodRecordResponse, FoodRecordUpdate
+from app.models.user_food_stat import UserFoodStat
+from app.schemas.food import (
+    FoodRankingItem,
+    FoodRecordCreate,
+    FoodRecordResponse,
+    FoodRecordUpdate,
+    FoodResponse,
+    UserFoodStatsResponse,
+)
 from app.schemas.interaction import CommentCreate, CommentResponse, ReactionCreate
 from app.services.recommendation import get_daily_recommendation, get_personalized_recommendations
-from app.utils.formatters import build_location, join_tags, split_tags
 
 router = APIRouter()
 
 
-LIKE_COUNT = func.sum(case((FoodReaction.reaction_type == ReactionType.like, 1), else_=0))
-DISLIKE_COUNT = func.sum(case((FoodReaction.reaction_type == ReactionType.dislike, 1), else_=0))
-WANT_TO_EAT_COUNT = func.sum(case((FoodReaction.reaction_type == ReactionType.want_to_eat, 1), else_=0))
+def food_stats_subquery(db: Session):
+    return (
+        db.query(
+            UserFoodStat.food_id.label('food_id'),
+            func.coalesce(func.sum(UserFoodStat.like_count), 0).label('like_count'),
+            func.coalesce(func.sum(UserFoodStat.dislike_count), 0).label('dislike_count'),
+        )
+        .group_by(UserFoodStat.food_id)
+        .subquery()
+    )
 
 
-def with_reaction_stats(db: Session):
+def get_food_stats(db: Session, food_id: int) -> tuple[int, int]:
+    row = (
+        db.query(
+            func.coalesce(func.sum(UserFoodStat.like_count), 0),
+            func.coalesce(func.sum(UserFoodStat.dislike_count), 0),
+        )
+        .filter(UserFoodStat.food_id == food_id)
+        .first()
+    )
+    return (int(row[0] or 0), int(row[1] or 0)) if row else (0, 0)
+
+
+def records_query(db: Session):
+    stats = food_stats_subquery(db)
     return (
         db.query(
             FoodRecord,
-            LIKE_COUNT.label('like_count'),
-            DISLIKE_COUNT.label('dislike_count'),
-            WANT_TO_EAT_COUNT.label('want_to_eat_count'),
+            Food,
+            func.coalesce(stats.c.like_count, 0).label('like_count'),
+            func.coalesce(stats.c.dislike_count, 0).label('dislike_count'),
         )
-        .outerjoin(FoodReaction, FoodReaction.food_record_id == FoodRecord.id)
-        .group_by(FoodRecord.id)
+        .join(Food, Food.id == FoodRecord.food_id)
+        .join(User, User.id == FoodRecord.user_id)
+        .outerjoin(stats, stats.c.food_id == Food.id)
     )
 
 
 def serialize_record(
     record: FoodRecord,
+    food: Food,
     like_count: int = 0,
     dislike_count: int = 0,
-    want_to_eat_count: int = 0,
 ) -> FoodRecordResponse:
     return FoodRecordResponse(
         id=record.id,
         user_id=record.user_id,
-        food_name=record.food_name,
-        dining_category=record.dining_category,
-        canteen_name=record.canteen_name,
-        floor=record.floor,
-        window_name=record.window_name,
-        store_name=record.store_name,
-        address=record.address,
-        price=record.price,
+        food_id=record.food_id,
+        food=FoodResponse.model_validate(food),
         sentiment=record.sentiment,
         rating_level=record.rating_level,
         review_text=record.review_text,
         image_url=record.image_url,
-        tags=split_tags(record.tags),
-        visited_at=record.visited_at,
-        is_public=record.is_public,
+        uploaded_at=record.uploaded_at,
         like_count=like_count or 0,
         dislike_count=dislike_count or 0,
-        want_to_eat_count=want_to_eat_count or 0,
         created_at=record.created_at,
+        updated_at=record.updated_at,
     )
+
+
+def get_or_create_food(db: Session, payload) -> Food:
+    food = (
+        db.query(Food)
+        .filter(
+            Food.name == payload.name,
+            Food.location == payload.location,
+            Food.price == payload.price,
+        )
+        .first()
+    )
+    if food:
+        if payload.image_url and not food.image_url:
+            food.image_url = payload.image_url
+            db.add(food)
+            db.flush()
+        return food
+
+    food = Food(
+        name=payload.name,
+        location=payload.location,
+        price=payload.price,
+        image_url=payload.image_url,
+    )
+    db.add(food)
+    db.flush()
+    return food
 
 
 @router.post('', response_model=FoodRecordResponse, status_code=status.HTTP_201_CREATED)
@@ -73,49 +121,57 @@ def create_food_record(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> FoodRecordResponse:
+    food = get_or_create_food(db, payload.food)
     record = FoodRecord(
         user_id=current_user.id,
-        **payload.model_dump(exclude={'tags'}),
-        tags=join_tags(payload.tags),
+        food_id=food.id,
+        sentiment=payload.sentiment,
+        rating_level=payload.rating_level,
+        review_text=payload.review_text,
+        image_url=payload.image_url,
     )
+    if payload.uploaded_at is not None:
+        record.uploaded_at = payload.uploaded_at
     db.add(record)
     db.commit()
     db.refresh(record)
-    return serialize_record(record)
+    db.refresh(food)
+    return serialize_record(record, food)
 
 
 @router.get('', response_model=list[FoodRecordResponse])
 def list_food_records(
-    tag: str | None = Query(default=None),
+    food_name: str | None = Query(default=None),
+    location: str | None = Query(default=None),
     sentiment: ReviewSentiment | None = Query(default=None),
     mine_only: bool = Query(default=False),
-    start_date: date | None = Query(default=None),
-    end_date: date | None = Query(default=None),
+    start_time: datetime | None = Query(default=None),
+    end_time: datetime | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[FoodRecordResponse]:
-    query = with_reaction_stats(db)
+    query = records_query(db)
 
     if mine_only:
         query = query.filter(FoodRecord.user_id == current_user.id)
     else:
-        query = query.filter(
-            (FoodRecord.user_id == current_user.id) | (FoodRecord.is_public.is_(True))
-        )
+        query = query.filter(or_(FoodRecord.user_id == current_user.id, User.is_private.is_(False)))
 
-    if tag:
-        query = query.filter(FoodRecord.tags.contains(tag))
+    if food_name:
+        query = query.filter(Food.name.contains(food_name))
+    if location:
+        query = query.filter(Food.location.contains(location))
     if sentiment:
         query = query.filter(FoodRecord.sentiment == sentiment)
-    if start_date:
-        query = query.filter(FoodRecord.visited_at >= start_date)
-    if end_date:
-        query = query.filter(FoodRecord.visited_at <= end_date)
+    if start_time:
+        query = query.filter(FoodRecord.uploaded_at >= start_time)
+    if end_time:
+        query = query.filter(FoodRecord.uploaded_at <= end_time)
 
-    rows = query.order_by(FoodRecord.visited_at.desc(), FoodRecord.id.desc()).all()
+    rows = query.order_by(FoodRecord.uploaded_at.desc(), FoodRecord.id.desc()).all()
     return [
-        serialize_record(record, like_count, dislike_count, want_to_eat_count)
-        for record, like_count, dislike_count, want_to_eat_count in rows
+        serialize_record(record, food, like_count, dislike_count)
+        for record, food, like_count, dislike_count in rows
     ]
 
 
@@ -126,8 +182,12 @@ def daily_recommendation(
 ) -> FoodRecordResponse:
     record = get_daily_recommendation(db, current_user)
     if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='??????')
-    return serialize_record(record)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No recommendation data')
+    row = records_query(db).filter(FoodRecord.id == record.id).first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Recommended record not found')
+    record, food, like_count, dislike_count = row
+    return serialize_record(record, food, like_count, dislike_count)
 
 
 @router.get('/recommendations/personalized', response_model=list[FoodRecordResponse])
@@ -136,7 +196,15 @@ def personalized_recommendation(
     db: Session = Depends(get_db),
 ) -> list[FoodRecordResponse]:
     records = get_personalized_recommendations(db, current_user)
-    return [serialize_record(record) for record in records]
+    if not records:
+        return []
+    record_ids = [record.id for record in records]
+    rows = records_query(db).filter(FoodRecord.id.in_(record_ids)).all()
+    row_map = {
+        record.id: (record, food, like_count, dislike_count)
+        for record, food, like_count, dislike_count in rows
+    }
+    return [serialize_record(*row_map[record_id]) for record_id in record_ids if record_id in row_map]
 
 
 @router.get('/rankings', response_model=list[FoodRankingItem])
@@ -146,218 +214,215 @@ def get_rankings(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[FoodRankingItem]:
-    query = with_reaction_stats(db)
-    today = date.today()
+    like_expr = func.sum(case((FoodRecord.sentiment == ReviewSentiment.like, 1), else_=0))
+    dislike_expr = func.sum(case((FoodRecord.sentiment == ReviewSentiment.dislike, 1), else_=0))
 
+    query = (
+        db.query(
+            Food.id.label('food_id'),
+            Food.name.label('food_name'),
+            Food.location.label('location'),
+            Food.price.label('price'),
+            like_expr.label('like_count'),
+            dislike_expr.label('dislike_count'),
+        )
+        .join(FoodRecord, FoodRecord.food_id == Food.id)
+        .join(User, User.id == FoodRecord.user_id)
+    )
+
+    now = datetime.now(timezone.utc)
     if period == 'daily':
-        query = query.filter(FoodRecord.visited_at == today)
+        query = query.filter(FoodRecord.uploaded_at >= now - timedelta(days=1))
     elif period == 'weekly':
-        query = query.filter(FoodRecord.visited_at >= today - timedelta(days=7))
+        query = query.filter(FoodRecord.uploaded_at >= now - timedelta(days=7))
 
     if scope == 'mine':
         query = query.filter(FoodRecord.user_id == current_user.id)
     else:
-        query = query.filter(FoodRecord.is_public.is_(True))
+        query = query.filter(or_(FoodRecord.user_id == current_user.id, User.is_private.is_(False)))
 
-    rows = query.order_by(
-        (LIKE_COUNT - DISLIKE_COUNT).desc(),
-        WANT_TO_EAT_COUNT.desc(),
-        FoodRecord.created_at.desc(),
-    ).limit(20).all()
+    rows = (
+        query.group_by(Food.id, Food.name, Food.location, Food.price)
+        .order_by((like_expr - dislike_expr).desc(), like_expr.desc(), Food.id.desc())
+        .limit(20)
+        .all()
+    )
 
     return [
         FoodRankingItem(
-            food_record_id=record.id,
-            food_name=record.food_name,
-            dining_location=build_location(record),
-            price=record.price,
-            like_count=like_count or 0,
-            dislike_count=dislike_count or 0,
-            want_to_eat_count=want_to_eat_count or 0,
-            score=(like_count or 0) - (dislike_count or 0),
+            food_id=row.food_id,
+            food_name=row.food_name,
+            location=row.location,
+            price=row.price,
+            like_count=row.like_count or 0,
+            dislike_count=row.dislike_count or 0,
+            score=(row.like_count or 0) - (row.dislike_count or 0),
         )
-        for record, like_count, dislike_count, want_to_eat_count in rows
+        for row in rows
     ]
 
 
-@router.get('/{food_id}', response_model=FoodRecordResponse)
+@router.get('/records/{record_id}', response_model=FoodRecordResponse)
 def get_food_record(
-    food_id: int,
+    record_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> FoodRecordResponse:
-    row = with_reaction_stats(db).filter(FoodRecord.id == food_id).first()
+    row = records_query(db).filter(FoodRecord.id == record_id).first()
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='?????')
-    record, like_count, dislike_count, want_to_eat_count = row
-    if record.user_id != current_user.id and not record.is_public:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='???????')
-    return serialize_record(record, like_count, dislike_count, want_to_eat_count)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Record not found')
+    record, food, like_count, dislike_count = row
+    if record.user_id != current_user.id and record.user.is_private:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Access denied')
+    return serialize_record(record, food, like_count, dislike_count)
 
 
-@router.put('/{food_id}', response_model=FoodRecordResponse)
+@router.put('/records/{record_id}', response_model=FoodRecordResponse)
 def update_food_record(
-    food_id: int,
+    record_id: int,
     payload: FoodRecordUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> FoodRecordResponse:
     record = (
         db.query(FoodRecord)
-        .filter(FoodRecord.id == food_id, FoodRecord.user_id == current_user.id)
+        .filter(FoodRecord.id == record_id, FoodRecord.user_id == current_user.id)
         .first()
     )
     if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='?????')
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Record not found')
 
-    update_data = payload.model_dump(exclude_unset=True)
-    if 'tags' in update_data:
-        record.tags = join_tags(update_data.pop('tags') or [])
+    if payload.food is not None:
+        food_update = payload.food.model_dump(exclude_unset=True)
+        for field, value in food_update.items():
+            setattr(record.food, field, value)
+        db.add(record.food)
+
+    update_data = payload.model_dump(exclude_unset=True, exclude={'food'})
     for field, value in update_data.items():
         setattr(record, field, value)
 
     db.add(record)
     db.commit()
     db.refresh(record)
-    return serialize_record(record)
+    db.refresh(record.food)
+    like_count, dislike_count = get_food_stats(db, record.food_id)
+    return serialize_record(record, record.food, like_count, dislike_count)
 
 
-@router.delete('/{food_id}')
+@router.delete('/records/{record_id}')
 def delete_food_record(
-    food_id: int,
+    record_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
     record = (
         db.query(FoodRecord)
-        .filter(FoodRecord.id == food_id, FoodRecord.user_id == current_user.id)
+        .filter(FoodRecord.id == record_id, FoodRecord.user_id == current_user.id)
         .first()
     )
     if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='?????')
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Record not found')
     db.delete(record)
     db.commit()
-    return {'message': '????'}
+    return {'message': 'Deleted successfully'}
 
 
-@router.post('/{food_id}/reuse', response_model=FoodRecordResponse, status_code=status.HTTP_201_CREATED)
+@router.post('/records/{record_id}/reuse', response_model=FoodRecordResponse, status_code=status.HTTP_201_CREATED)
 def reuse_food_record(
-    food_id: int,
+    record_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> FoodRecordResponse:
-    source = db.query(FoodRecord).filter(FoodRecord.id == food_id).first()
+    source = db.query(FoodRecord).filter(FoodRecord.id == record_id).first()
     if not source:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='??????')
-    if source.user_id != current_user.id and not source.is_public:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='???????')
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Source record not found')
+    if source.user_id != current_user.id and source.user.is_private:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Access denied')
 
     new_record = FoodRecord(
         user_id=current_user.id,
-        food_name=source.food_name,
-        dining_category=source.dining_category,
-        canteen_name=source.canteen_name,
-        floor=source.floor,
-        window_name=source.window_name,
-        store_name=source.store_name,
-        address=source.address,
-        price=source.price,
+        food_id=source.food_id,
         sentiment=source.sentiment,
         rating_level=source.rating_level,
         review_text=source.review_text,
         image_url=source.image_url,
-        tags=source.tags,
-        visited_at=date.today(),
-        is_public=source.is_public,
     )
     db.add(new_record)
     db.commit()
     db.refresh(new_record)
-    return serialize_record(new_record)
+    like_count, dislike_count = get_food_stats(db, new_record.food_id)
+    return serialize_record(new_record, new_record.food, like_count, dislike_count)
 
 
-@router.post('/{food_id}/reactions')
+@router.post('/{food_id}/reactions', response_model=UserFoodStatsResponse)
 def react_to_food(
     food_id: int,
     payload: ReactionCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> dict[str, str]:
-    record = db.query(FoodRecord).filter(FoodRecord.id == food_id).first()
-    if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='?????')
+) -> UserFoodStatsResponse:
+    food = db.query(Food).filter(Food.id == food_id).first()
+    if not food:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Food not found')
 
-    existing = (
-        db.query(FoodReaction)
-        .filter(
-            FoodReaction.user_id == current_user.id,
-            FoodReaction.food_record_id == food_id,
-            FoodReaction.reaction_type == payload.reaction_type,
-        )
+    stats = (
+        db.query(UserFoodStat)
+        .filter(UserFoodStat.user_id == current_user.id, UserFoodStat.food_id == food_id)
         .first()
     )
-    if existing:
-        db.delete(existing)
-        db.commit()
-        return {'message': '?????'}
+    if not stats:
+        stats = UserFoodStat(user_id=current_user.id, food_id=food_id, like_count=0, dislike_count=0)
 
-    if payload.reaction_type in {ReactionType.like, ReactionType.dislike}:
-        opposite = ReactionType.dislike if payload.reaction_type == ReactionType.like else ReactionType.like
-        opposite_reaction = (
-            db.query(FoodReaction)
-            .filter(
-                FoodReaction.user_id == current_user.id,
-                FoodReaction.food_record_id == food_id,
-                FoodReaction.reaction_type == opposite,
-            )
-            .first()
-        )
-        if opposite_reaction:
-            db.delete(opposite_reaction)
+    if payload.reaction_type == ReviewSentiment.like:
+        stats.like_count += 1
+    else:
+        stats.dislike_count += 1
 
-    reaction = FoodReaction(
-        user_id=current_user.id,
-        food_record_id=food_id,
-        reaction_type=payload.reaction_type,
-    )
-    db.add(reaction)
+    db.add(stats)
     db.commit()
-    return {'message': '????'}
+    db.refresh(stats)
+    return UserFoodStatsResponse(
+        user_id=stats.user_id,
+        food_id=stats.food_id,
+        like_count=stats.like_count,
+        dislike_count=stats.dislike_count,
+    )
 
 
-@router.post('/{food_id}/comments', response_model=CommentResponse, status_code=status.HTTP_201_CREATED)
+@router.post('/records/{record_id}/comments', response_model=CommentResponse, status_code=status.HTTP_201_CREATED)
 def create_comment(
-    food_id: int,
+    record_id: int,
     payload: CommentCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> CommentResponse:
-    record = db.query(FoodRecord).filter(FoodRecord.id == food_id).first()
+    record = db.query(FoodRecord).filter(FoodRecord.id == record_id).first()
     if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='?????')
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Record not found')
 
-    comment = Comment(user_id=current_user.id, food_record_id=food_id, content=payload.content)
+    comment = Comment(user_id=current_user.id, food_record_id=record_id, content=payload.content)
     db.add(comment)
     db.commit()
     db.refresh(comment)
     return CommentResponse.model_validate(comment)
 
 
-@router.get('/{food_id}/comments', response_model=list[CommentResponse])
+@router.get('/records/{record_id}/comments', response_model=list[CommentResponse])
 def list_comments(
-    food_id: int,
+    record_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[CommentResponse]:
-    record = db.query(FoodRecord).filter(FoodRecord.id == food_id).first()
+    record = db.query(FoodRecord).filter(FoodRecord.id == record_id).first()
     if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='?????')
-    if record.user_id != current_user.id and not record.is_public:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='??????')
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Record not found')
+    if record.user_id != current_user.id and record.user.is_private:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Cannot view comments')
 
     comments = (
         db.query(Comment)
-        .filter(Comment.food_record_id == food_id)
+        .filter(Comment.food_record_id == record_id)
         .order_by(Comment.created_at.desc())
         .all()
     )

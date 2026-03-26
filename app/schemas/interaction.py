@@ -2,11 +2,11 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import ReactionType
+from app.models.enums import ReviewSentiment
 
 
 class ReactionCreate(BaseModel):
-    reaction_type: ReactionType
+    reaction_type: ReviewSentiment
 
 
 class CommentCreate(BaseModel):

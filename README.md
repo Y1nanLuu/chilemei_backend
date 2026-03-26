@@ -1,12 +1,12 @@
-﻿# 吃了没后端
+# 吃了没后端
 
-基于 `FastAPI + SQLAlchemy + MySQL` 实现的校园美食记录与年度报告后端，覆盖项目计划书里的核心后端能力：
+基于 `FastAPI + SQLAlchemy + MySQL` 的校园美食记录后端，当前已经切换到新的数据模型：
 
-- 用户注册、登录、修改密码、个人资料、隐私设置
-- 美食记录新增、查询、修改、删除、历史复用
-- 赞、踩、想吃互动与评论
-- 每日推荐、个性化推荐、日榜、周榜、总榜
-- 年度报告统计接口
+- `users`：用户信息
+- `food`：食物基础信息
+- `food_records`：用户对食物的一次打卡/评价记录
+- `user_food_stats`：同一用户对同一食物的累计点赞/点踩统计
+- `comments`：挂在具体 `food_record` 上的评论
 
 ## 目录结构
 
@@ -53,30 +53,73 @@ uvicorn app.main:app --reload
 - `http://127.0.0.1:8000/docs`
 - `http://127.0.0.1:8000/health`
 
-## 已实现接口
+## 当前接口结构
+
+### 认证
+
+注意：正式方案应接入微信登录。
+当前代码中的 `register/login/reset-password` 仍是开发期占位实现，方便本地调试，不应视为最终小程序登录协议。
 
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/reset-password`
+
+后续建议替换为：
+
+- `POST /api/v1/auth/wechat-login`
+  - 前端上传微信 `code`
+  - 后端调用微信 `code2Session` 接口
+  - 以 `openid/unionid` 查找或创建用户
+  - 返回业务侧 token
+
+### 用户
+
 - `GET /api/v1/users/me`
 - `PUT /api/v1/users/me`
 - `PUT /api/v1/users/me/privacy`
+
+### 食物与记录
+
 - `POST /api/v1/foods`
+  - 新建一条用户打卡记录；如果食物不存在会自动创建 `food`
 - `GET /api/v1/foods`
-- `GET /api/v1/foods/{food_id}`
-- `PUT /api/v1/foods/{food_id}`
-- `DELETE /api/v1/foods/{food_id}`
-- `POST /api/v1/foods/{food_id}/reuse`
+  - 查询记录列表，支持按食物名、位置、评价倾向、时间范围筛选
+- `GET /api/v1/foods/records/{record_id}`
+- `PUT /api/v1/foods/records/{record_id}`
+- `DELETE /api/v1/foods/records/{record_id}`
+- `POST /api/v1/foods/records/{record_id}/reuse`
+
+### 食物互动统计
+
 - `POST /api/v1/foods/{food_id}/reactions`
-- `POST /api/v1/foods/{food_id}/comments`
-- `GET /api/v1/foods/{food_id}/comments`
+  - 累计当前用户对该食物的 like/dislike 次数，写入 `user_food_stats`
+- `GET /api/v1/foods/rankings`
+  - 榜单按 `food` 聚合，不再按单条 `record` 聚合
+
+### 推荐
+
 - `GET /api/v1/foods/recommendations/daily`
 - `GET /api/v1/foods/recommendations/personalized`
-- `GET /api/v1/foods/rankings`
+
+### 评论
+
+- `POST /api/v1/foods/records/{record_id}/comments`
+- `GET /api/v1/foods/records/{record_id}/comments`
+
+### 报告
+
 - `GET /api/v1/reports/annual/{year}`
 
-## 当前实现说明
+## 重要说明
 
-- 图片上传这一版先用 `image_url` 字段承接，方便前端先联调；后续可接对象存储。
-- 个性化推荐当前是基础标签匹配版，后续可扩展协同过滤和召回排序。
-- 年度报告当前返回结构化 JSON，图片版和 PDF 导出适合后续做成独立导出服务。
+- `food_id` 表示食物本体，适用于互动统计、榜单、聚合分析。
+- `record_id` 表示某个用户对某个食物的一次具体记录，适用于修改、删除、评论、复用。
+- `POST /api/v1/foods` 的请求体里包含 `food` 对象和记录字段，后端会自动做“食物存在则复用，不存在则创建”。
+- 年度报告当前基于 `food_records.uploaded_at` 统计。
+- 图片上传这一版仍先使用 `image_url` 字段承接，方便前端联调；后续可以换成对象存储。
+- `users` 表里已经预留了 `wechat_openid` 和 `wechat_unionid` 字段，认证体系应优先围绕这两个字段设计。
+
+## 接口文档
+
+更详细的字段说明和示例请求见：
+[docs/api_reference.md](/e:/Projects/chilemei_backend/docs/api_reference.md)

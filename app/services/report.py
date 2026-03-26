@@ -1,69 +1,61 @@
-﻿from collections import Counter, defaultdict
-from datetime import date
+from collections import Counter, defaultdict
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from app.models.enums import DiningCategory
+from app.models.enums import ReviewSentiment
 from app.models.food_record import FoodRecord
 from app.schemas.report import AnnualReportResponse, MonthlySpendItem
-from app.utils.formatters import build_location
 
 
 def build_title_tags(records: list[FoodRecord]) -> list[str]:
     if not records:
-        return ['年度鸽子食客']
+        return ["\u5e74\u5ea6\u9e3d\u5b50\u98df\u5ba2"]
 
-    on_campus_count = sum(
-        1 for record in records if record.dining_category == DiningCategory.on_campus
-    )
-    avg_price = sum(record.price for record in records) / len(records)
+    avg_price = sum(record.food.price for record in records) / len(records)
+    like_ratio = sum(1 for record in records if record.sentiment == ReviewSentiment.like) / len(records)
     tags = []
 
-    if on_campus_count / len(records) >= 0.7:
-        tags.append('食堂干饭王')
-    if on_campus_count / len(records) <= 0.3:
-        tags.append('校外探店达人')
     if avg_price <= Decimal('20'):
-        tags.append('平价美食猎人')
+        tags.append("\u5e73\u4ef7\u7f8e\u98df\u730e\u4eba")
     if avg_price >= Decimal('50'):
-        tags.append('轻奢干饭家')
+        tags.append("\u8f7b\u5962\u5e72\u996d\u5bb6")
+    if like_ratio >= 0.8:
+        tags.append("\u4e94\u661f\u5403\u8d27")
+    if len({record.food.location for record in records}) >= 5:
+        tags.append("\u63a2\u5e97\u8fbe\u4eba")
     if not tags:
-        tags.append('会吃也会记的校园食客')
+        tags.append("\u4f1a\u5403\u4e5f\u4f1a\u8bb0\u7684\u6821\u56ed\u98df\u5ba2")
     return tags
 
 
 def generate_annual_report(db: Session, user_id: int, year: int) -> AnnualReportResponse:
+    start = datetime(year, 1, 1)
+    end = datetime(year + 1, 1, 1)
     records = (
         db.query(FoodRecord)
         .filter(
             FoodRecord.user_id == user_id,
-            FoodRecord.visited_at.between(date(year, 1, 1), date(year, 12, 31)),
+            FoodRecord.uploaded_at >= start,
+            FoodRecord.uploaded_at < end,
         )
         .all()
     )
 
-    total_spend = sum((record.price for record in records), Decimal('0'))
+    total_spend = sum((record.food.price for record in records), Decimal('0'))
     average_spend = total_spend / len(records) if records else Decimal('0')
-    on_campus_count = sum(
-        1 for record in records if record.dining_category == DiningCategory.on_campus
-    )
-    off_campus_count = len(records) - on_campus_count
+    total_like_records = sum(1 for record in records if record.sentiment == ReviewSentiment.like)
+    total_dislike_records = len(records) - total_like_records
 
-    food_counter = Counter(record.food_name for record in records)
-    location_counter = Counter(build_location(record) for record in records)
+    food_counter = Counter(record.food.name for record in records)
+    location_counter = Counter(record.food.location for record in records)
     monthly = defaultdict(lambda: {'total_spend': Decimal('0'), 'record_count': 0})
-    budget_count = 0
-    premium_count = 0
 
     for record in records:
-        bucket = monthly[record.visited_at.month]
-        bucket['total_spend'] += record.price
+        bucket = monthly[record.uploaded_at.month]
+        bucket['total_spend'] += record.food.price
         bucket['record_count'] += 1
-        if record.price <= Decimal('20'):
-            budget_count += 1
-        if record.price >= Decimal('50'):
-            premium_count += 1
 
     monthly_spend = [
         MonthlySpendItem(
@@ -79,12 +71,10 @@ def generate_annual_report(db: Session, user_id: int, year: int) -> AnnualReport
         total_records=len(records),
         total_spend=total_spend,
         average_spend=average_spend.quantize(Decimal('0.01')) if records else Decimal('0.00'),
-        on_campus_count=on_campus_count,
-        off_campus_count=off_campus_count,
+        total_like_records=total_like_records,
+        total_dislike_records=total_dislike_records,
         top_foods=[item for item, _ in food_counter.most_common(5)],
         top_locations=[item for item, _ in location_counter.most_common(5)],
-        budget_ratio=round(budget_count / len(records), 4) if records else 0,
-        premium_ratio=round(premium_count / len(records), 4) if records else 0,
         monthly_spend=monthly_spend,
         title_tags=build_title_tags(records),
     )

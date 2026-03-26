@@ -1,57 +1,66 @@
-CREATE DATABASE IF NOT EXISTS chilemei DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+﻿CREATE DATABASE IF NOT EXISTS chilemei DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE chilemei;
 
 CREATE TABLE IF NOT EXISTS users (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
-    username VARCHAR(50) NOT NULL UNIQUE,
-    email VARCHAR(120) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
+    wechat_openid VARCHAR(100) UNIQUE NULL,
+    wechat_unionid VARCHAR(100) UNIQUE NULL,
+    username VARCHAR(50) NULL UNIQUE,
+    email VARCHAR(120) NULL UNIQUE,
+    password_hash VARCHAR(255) NULL,
     nickname VARCHAR(50) NOT NULL,
     bio VARCHAR(255) NULL,
     avatar_url VARCHAR(255) NULL,
-    school_name VARCHAR(100) NULL,
     is_private TINYINT(1) NOT NULL DEFAULT 0,
     is_active TINYINT(1) NOT NULL DEFAULT 1,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS food (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(120) NOT NULL,
+    location VARCHAR(255) NOT NULL,
+    price DECIMAL(10, 2) NOT NULL,
+    image_url VARCHAR(255) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_food_name (name),
+    INDEX idx_food_location (location)
+);
+
 CREATE TABLE IF NOT EXISTS food_records (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     user_id BIGINT NOT NULL,
-    food_name VARCHAR(120) NOT NULL,
-    dining_category ENUM('on_campus', 'off_campus') NOT NULL,
-    canteen_name VARCHAR(120) NULL,
-    floor VARCHAR(50) NULL,
-    window_name VARCHAR(120) NULL,
-    store_name VARCHAR(120) NULL,
-    address VARCHAR(255) NULL,
-    price DECIMAL(10, 2) NOT NULL,
+    food_id BIGINT NOT NULL,
     sentiment ENUM('like', 'dislike') NOT NULL,
     rating_level ENUM('夯', '顶级', '人上人', 'NPC', '拉完了') NOT NULL,
     review_text TEXT NULL,
     image_url VARCHAR(255) NULL,
-    tags VARCHAR(255) NULL,
-    visited_at DATE NOT NULL,
-    is_public TINYINT(1) NOT NULL DEFAULT 1,
+    uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_food_records_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_food_records_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_food_records_food FOREIGN KEY (food_id) REFERENCES food(id) ON DELETE RESTRICT,
     INDEX idx_food_records_user_id (user_id),
-    INDEX idx_food_records_food_name (food_name),
-    INDEX idx_food_records_visited_at (visited_at)
+    INDEX idx_food_records_food_id (food_id),
+    INDEX idx_food_records_uploaded_at (uploaded_at),
+    INDEX idx_user_food_time (user_id, food_id, uploaded_at)
 );
 
-CREATE TABLE IF NOT EXISTS food_reactions (
+CREATE TABLE IF NOT EXISTS user_food_stats (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     user_id BIGINT NOT NULL,
-    food_record_id BIGINT NOT NULL,
-    reaction_type ENUM('like', 'dislike', 'want_to_eat') NOT NULL,
+    food_id BIGINT NOT NULL,
+    like_count INT NOT NULL DEFAULT 0,
+    dislike_count INT NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_food_reactions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    CONSTRAINT fk_food_reactions_record FOREIGN KEY (food_record_id) REFERENCES food_records(id) ON DELETE CASCADE,
-    UNIQUE KEY uk_food_reactions_user_record_type (user_id, food_record_id, reaction_type),
-    INDEX idx_food_reactions_record_id (food_record_id)
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_user_food_stats_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_user_food_stats_food FOREIGN KEY (food_id) REFERENCES food(id) ON DELETE RESTRICT,
+    UNIQUE KEY uk_user_food_stats_user_food (user_id, food_id),
+    INDEX idx_user_food_stats_user_id (user_id),
+    INDEX idx_user_food_stats_food_id (food_id)
 );
 
 CREATE TABLE IF NOT EXISTS comments (
@@ -60,7 +69,7 @@ CREATE TABLE IF NOT EXISTS comments (
     food_record_id BIGINT NOT NULL,
     content TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_comments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_comments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
     CONSTRAINT fk_comments_record FOREIGN KEY (food_record_id) REFERENCES food_records(id) ON DELETE CASCADE,
     INDEX idx_comments_record_id (food_record_id)
 );

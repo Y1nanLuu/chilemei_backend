@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
@@ -17,7 +17,7 @@ def register(payload: UserRegister, db: Session = Depends(get_db)) -> TokenRespo
         .first()
     )
     if existing_user:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='用户名或邮箱已存在')
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='\u7528\u6237\u540d\u6216\u90ae\u7bb1\u5df2\u5b58\u5728')
 
     user = User(
         username=payload.username,
@@ -34,8 +34,8 @@ def register(payload: UserRegister, db: Session = Depends(get_db)) -> TokenRespo
 @router.post('/login', response_model=TokenResponse)
 def login(payload: UserLogin, db: Session = Depends(get_db)) -> TokenResponse:
     user = db.query(User).filter(User.username == payload.username).first()
-    if not user or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='用户名或密码错误')
+    if not user or not user.password_hash or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='\u7528\u6237\u540d\u6216\u5bc6\u7801\u9519\u8bef')
 
     return TokenResponse(access_token=create_access_token(user.username))
 
@@ -46,10 +46,10 @@ def reset_password(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
-    if not verify_password(payload.old_password, current_user.password_hash):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='旧密码错误')
+    if not current_user.password_hash or not verify_password(payload.old_password, current_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='\u65e7\u5bc6\u7801\u9519\u8bef')
 
     current_user.password_hash = get_password_hash(payload.new_password)
     db.add(current_user)
     db.commit()
-    return {'message': '密码修改成功'}
+    return {'message': '\u5bc6\u7801\u4fee\u6539\u6210\u529f'}

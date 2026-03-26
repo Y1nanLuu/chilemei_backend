@@ -14,11 +14,9 @@ class AnnualReportResponse(BaseModel):
     total_records: int
     total_spend: Decimal
     average_spend: Decimal
-    on_campus_count: int
-    off_campus_count: int
+    total_like_records: int
+    total_dislike_records: int
     top_foods: list[str]
     top_locations: list[str]
-    budget_ratio: float
-    premium_ratio: float
     monthly_spend: list[MonthlySpendItem]
     title_tags: list[str]
