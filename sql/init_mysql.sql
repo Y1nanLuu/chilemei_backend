@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS food_records (
     user_id BIGINT NOT NULL,
     food_id BIGINT NOT NULL,
     sentiment ENUM('like', 'dislike') NOT NULL,
-    rating_level ENUM('夯', '顶级', '人上人', 'NPC', '拉完了') NOT NULL,
+    rating_level TINYINT NOT NULL COMMENT '5:顶级, 4:夯, 3:人上人, 2:NPC, 1:拉完了',
     review_text TEXT NULL,
     image_url VARCHAR(255) NULL,
     uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

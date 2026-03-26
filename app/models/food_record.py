@@ -1,10 +1,10 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, Enum, ForeignKey, SmallInteger, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.models.enums import RatingLevel, ReviewSentiment
+from app.models.enums import ReviewSentiment
 
 
 class FoodRecord(Base):
@@ -14,7 +14,7 @@ class FoodRecord(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
     food_id: Mapped[int] = mapped_column(ForeignKey("food.id", ondelete="RESTRICT"), nullable=False, index=True)
     sentiment: Mapped[ReviewSentiment] = mapped_column(Enum(ReviewSentiment), nullable=False)
-    rating_level: Mapped[RatingLevel] = mapped_column(Enum(RatingLevel), nullable=False)
+    rating_level: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     review_text: Mapped[str | None] = mapped_column(Text())
     image_url: Mapped[str | None] = mapped_column(String(255))
     uploaded_at: Mapped[datetime] = mapped_column(

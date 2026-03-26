@@ -26,18 +26,25 @@ def get_current_user(
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="认证信息无效",
+        detail="Invalid authentication credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
-        username = payload.get("sub")
-        if not username:
+        subject = payload.get("sub")
+        if not subject:
             raise credentials_exception
     except JWTError as exc:
         raise credentials_exception from exc
 
-    user = db.query(User).filter(User.username == username, User.is_active.is_(True)).first()
+    user = None
+    if isinstance(subject, str) and subject.startswith("user:"):
+        user_id = subject.split(":", 1)[1]
+        if user_id.isdigit():
+            user = db.query(User).filter(User.id == int(user_id), User.is_active.is_(True)).first()
+    else:
+        user = db.query(User).filter(User.username == subject, User.is_active.is_(True)).first()
+
     if not user:
         raise credentials_exception
     return user

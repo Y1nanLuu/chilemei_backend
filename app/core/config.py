@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     model_config = ConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    project_name: str = "吃了没 Backend"
+    project_name: str = "Chilemei Backend"
     api_v1_prefix: str = "/api/v1"
     mysql_host: str = "127.0.0.1"
     mysql_port: int = 3306
@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     secret_key: str = "replace-this-with-a-long-random-secret"
     access_token_expire_minutes: int = 60 * 24 * 7
     auto_create_tables: bool = False
+    wechat_app_id: str = ""
+    wechat_app_secret: str = ""
+    wechat_code2session_url: str = "https://api.weixin.qq.com/sns/jscode2session"
 
     @property
     def database_url(self) -> str:

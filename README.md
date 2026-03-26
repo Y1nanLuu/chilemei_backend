@@ -41,6 +41,11 @@ source sql/init_mysql.sql;
 3. 配置环境变量
 
 将 `.env.example` 复制为 `.env`，再按你的 MySQL 账号修改连接信息。
+如果要使用微信登录，还需配置：
+
+- `WECHAT_APP_ID`
+- `WECHAT_APP_SECRET`
+- `WECHAT_CODE2SESSION_URL`（可选，默认即微信官方 `code2Session` 地址）
 
 4. 启动服务
 
@@ -57,20 +62,19 @@ uvicorn app.main:app --reload
 
 ### 认证
 
-注意：正式方案应接入微信登录。
-当前代码中的 `register/login/reset-password` 仍是开发期占位实现，方便本地调试，不应视为最终小程序登录协议。
+正式可用的小程序登录接口：
+
+- `POST /api/v1/auth/wechat-login`
+  - 前端上传微信登录 `code`
+  - 后端调用微信 `code2Session`
+  - 后端根据 `openid/unionid` 查找或创建用户
+  - 后端返回业务 JWT 和用户信息
+
+仍保留但仅用于开发期联调的占位接口：
 
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/reset-password`
-
-后续建议替换为：
-
-- `POST /api/v1/auth/wechat-login`
-  - 前端上传微信 `code`
-  - 后端调用微信 `code2Session` 接口
-  - 以 `openid/unionid` 查找或创建用户
-  - 返回业务侧 token
 
 ### 用户
 

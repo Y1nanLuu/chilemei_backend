@@ -1,9 +1,12 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import RatingLevel, ReviewSentiment
+from app.models.enums import ReviewSentiment
+
+RatingLevelValue = Annotated[int, Field(ge=1, le=5)]
 
 
 class FoodBase(BaseModel):
@@ -37,7 +40,7 @@ class FoodResponse(BaseModel):
 class FoodRecordCreate(BaseModel):
     food: FoodCreate
     sentiment: ReviewSentiment
-    rating_level: RatingLevel
+    rating_level: RatingLevelValue
     review_text: str | None = None
     image_url: str | None = Field(default=None, max_length=255)
     uploaded_at: datetime | None = None
@@ -46,19 +49,21 @@ class FoodRecordCreate(BaseModel):
 class FoodRecordUpdate(BaseModel):
     food: FoodUpdate | None = None
     sentiment: ReviewSentiment | None = None
-    rating_level: RatingLevel | None = None
+    rating_level: RatingLevelValue | None = None
     review_text: str | None = None
     image_url: str | None = Field(default=None, max_length=255)
     uploaded_at: datetime | None = None
 
 
 class FoodRecordResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     user_id: int
     food_id: int
     food: FoodResponse
     sentiment: ReviewSentiment
-    rating_level: RatingLevel
+    rating_level: RatingLevelValue
     review_text: str | None
     image_url: str | None
     uploaded_at: datetime

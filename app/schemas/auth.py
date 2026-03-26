@@ -21,3 +21,20 @@ class TokenResponse(BaseModel):
 class PasswordReset(BaseModel):
     old_password: str = Field(min_length=6, max_length=50)
     new_password: str = Field(min_length=6, max_length=50)
+
+
+class WechatLoginRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=255)
+
+
+class AuthUserInfo(BaseModel):
+    id: int
+    nickname: str
+    avatar_url: str | None = None
+    is_new_user: bool = False
+
+
+class WechatLoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: AuthUserInfo
