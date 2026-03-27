@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
+from app.core.config import settings
 from app.models.comment import Comment
 from app.models.enums import ReviewSentiment
 from app.models.food import Food
@@ -12,6 +15,7 @@ from app.models.food_record import FoodRecord
 from app.models.user import User
 from app.models.user_food_stat import UserFoodStat
 from app.schemas.food import (
+    FoodImageUploadResponse,
     FoodRankingItem,
     FoodRecordCreate,
     FoodRecordResponse,
@@ -23,6 +27,13 @@ from app.schemas.interaction import CommentCreate, CommentResponse, ReactionCrea
 from app.services.recommendation import get_daily_recommendation, get_personalized_recommendations
 
 router = APIRouter()
+ALLOWED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
+ALLOWED_IMAGE_CONTENT_TYPES = {
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/gif',
+}
 
 
 def food_stats_subquery(db: Session):
@@ -113,6 +124,44 @@ def get_or_create_food(db: Session, payload) -> Food:
     db.add(food)
     db.flush()
     return food
+
+
+def build_public_image_url(request: Request, relative_path: str) -> str:
+    base = str(request.base_url).rstrip('/')
+    return f"{base}{relative_path}"
+
+
+@router.post('/upload-image', response_model=FoodImageUploadResponse, status_code=status.HTTP_201_CREATED)
+async def upload_food_image(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+) -> FoodImageUploadResponse:
+    del current_user
+
+    suffix = Path(file.filename or '').suffix.lower()
+    if suffix not in ALLOWED_IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Unsupported image extension')
+    if file.content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Unsupported image content type')
+
+    settings.food_record_media_root.mkdir(parents=True, exist_ok=True)
+    unique_name = f"{uuid4().hex}{suffix}"
+    stored_file = settings.food_record_media_root / unique_name
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Uploaded file is empty')
+
+    stored_file.write_bytes(file_bytes)
+    relative_path = f"{settings.media_url_prefix}/{settings.food_record_upload_dir}/{unique_name}"
+    image_url = build_public_image_url(request, relative_path)
+
+    return FoodImageUploadResponse(
+        image_url=image_url,
+        stored_path=stored_file.as_posix(),
+        original_filename=file.filename or unique_name,
+    )
 
 
 @router.post('', response_model=FoodRecordResponse, status_code=status.HTTP_201_CREATED)

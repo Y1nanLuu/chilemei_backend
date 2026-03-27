@@ -45,7 +45,10 @@ source sql/init_mysql.sql;
 
 - `WECHAT_APP_ID`
 - `WECHAT_APP_SECRET`
-- `WECHAT_CODE2SESSION_URL`（可选，默认即微信官方 `code2Session` 地址）
+- `WECHAT_CODE2SESSION_URL`
+- `MEDIA_DIR`
+- `FOOD_RECORD_UPLOAD_DIR`
+- `MEDIA_URL_PREFIX`
 
 4. 启动服务
 
@@ -82,6 +85,15 @@ uvicorn app.main:app --reload
 - `PUT /api/v1/users/me`
 - `PUT /api/v1/users/me/privacy`
 
+### 图片上传
+
+- `POST /api/v1/foods/upload-image`
+  - 小程序通过 `wx.uploadFile` 上传图片
+  - 后端把图片保存到项目本地 `media/food_records/`
+  - 后端返回可以直接展示的 `image_url`
+
+上传成功后，再将返回的 `image_url` 传给记录创建或修改接口。
+
 ### 食物与记录
 
 - `POST /api/v1/foods`
@@ -114,13 +126,21 @@ uvicorn app.main:app --reload
 
 - `GET /api/v1/reports/annual/{year}`
 
+## 图片上传流程
+
+1. 小程序选择相册或拍照后，先调用 `/api/v1/foods/upload-image`
+2. 后端保存图片到本地目录，返回 `image_url`
+3. 小程序调用 `POST /api/v1/foods` 或 `PUT /api/v1/foods/records/{record_id}`
+4. 请求体里直接传入 `image_url`
+5. 前端展示时直接使用 `<image src="{{item.image_url}}">`
+
 ## 重要说明
 
 - `food_id` 表示食物本体，适用于互动统计、榜单、聚合分析。
 - `record_id` 表示某个用户对某个食物的一次具体记录，适用于修改、删除、评论、复用。
 - `POST /api/v1/foods` 的请求体里包含 `food` 对象和记录字段，后端会自动做“食物存在则复用，不存在则创建”。
+- `rating_level` 使用 1-5 数字表示评分。
 - 年度报告当前基于 `food_records.uploaded_at` 统计。
-- 图片上传这一版仍先使用 `image_url` 字段承接，方便前端联调；后续可以换成对象存储。
 - `users` 表里已经预留了 `wechat_openid` 和 `wechat_unionid` 字段，认证体系应优先围绕这两个字段设计。
 
 ## 接口文档

@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
@@ -21,6 +22,9 @@ class Settings(BaseSettings):
     wechat_app_id: str = ""
     wechat_app_secret: str = ""
     wechat_code2session_url: str = "https://api.weixin.qq.com/sns/jscode2session"
+    media_dir: str = "media"
+    food_record_upload_dir: str = "food_records"
+    media_url_prefix: str = "/media"
 
     @property
     def database_url(self) -> str:
@@ -29,6 +33,14 @@ class Settings(BaseSettings):
             f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_db}"
             f"?charset={self.mysql_charset}"
         )
+
+    @property
+    def media_root(self) -> Path:
+        return Path(self.media_dir)
+
+    @property
+    def food_record_media_root(self) -> Path:
+        return self.media_root / self.food_record_upload_dir
 
 
 @lru_cache
