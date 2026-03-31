@@ -1,0 +1,48 @@
+﻿services:
+  db:
+    image: mysql:8.4
+    container_name: chilemei-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-123456}
+      MYSQL_DATABASE: ${MYSQL_DB:-chilemei}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./sql/init_mysql.sql:/docker-entrypoint-initdb.d/init_mysql.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${MYSQL_PASSWORD:-123456}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chilemei-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      MYSQL_HOST: db
+      MYSQL_PORT: 3306
+      MEDIA_DIR: /app/media
+      FOOD_UPLOAD_DIR: ${FOOD_UPLOAD_DIR:-food}
+      TEMP_UPLOAD_DIR: ${TEMP_UPLOAD_DIR:-temp}
+      MEDIA_URL_PREFIX: ${MEDIA_URL_PREFIX:-/media}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./media:/app/media
+
+volumes:
+  mysql_data:

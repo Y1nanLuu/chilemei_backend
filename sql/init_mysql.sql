@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS food (
     name VARCHAR(120) NOT NULL,
     location VARCHAR(255) NOT NULL,
     price DECIMAL(10, 2) NOT NULL,
-    image_dir VARCHAR(255) NULL,
+    image_dir VARCHAR(255) NULL COMMENT 'Relative media dir, e.g. food/12',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_food_name_location (name, location),
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS food_records (
     sentiment ENUM('like', 'dislike') NOT NULL,
     rating_level TINYINT NOT NULL COMMENT '5:顶级, 4:夯, 3:人上人, 2:NPC, 1:拉完了',
     review_text TEXT NULL,
-    image_filename VARCHAR(255) NULL,
+    image_filename VARCHAR(255) NULL COMMENT 'Only stores filename; final URL is built from food.image_dir + filename',
     uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -72,5 +72,6 @@ CREATE TABLE IF NOT EXISTS comments (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_comments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
     CONSTRAINT fk_comments_record FOREIGN KEY (food_record_id) REFERENCES food_records(id) ON DELETE CASCADE,
+    INDEX idx_comments_user_id (user_id),
     INDEX idx_comments_record_id (food_record_id)
 );
