@@ -265,6 +265,7 @@ def get_rankings(
 ) -> list[FoodRankingItem]:
     like_expr = func.sum(case((FoodRecord.sentiment == ReviewSentiment.like, 1), else_=0))
     dislike_expr = func.sum(case((FoodRecord.sentiment == ReviewSentiment.dislike, 1), else_=0))
+    score_expr = func.avg(FoodRecord.rating_level)
 
     query = (
         db.query(
@@ -274,9 +275,9 @@ def get_rankings(
             Food.price.label('price'),
             like_expr.label('like_count'),
             dislike_expr.label('dislike_count'),
+            score_expr.label('score'),
         )
         .join(FoodRecord, FoodRecord.food_id == Food.id)
-        .join(User, User.id == FoodRecord.user_id)
     )
 
     now = datetime.now(timezone.utc)
@@ -287,12 +288,10 @@ def get_rankings(
 
     if scope == 'mine':
         query = query.filter(FoodRecord.user_id == current_user.id)
-    else:
-        query = query.filter(or_(FoodRecord.user_id == current_user.id, User.is_private.is_(False)))
 
     rows = (
         query.group_by(Food.id, Food.name, Food.location, Food.price)
-        .order_by((like_expr - dislike_expr).desc(), like_expr.desc(), Food.id.desc())
+        .order_by(score_expr.desc(), like_expr.desc(), dislike_expr.asc(), Food.id.desc())
         .limit(20)
         .all()
     )
@@ -305,7 +304,7 @@ def get_rankings(
             price=row.price,
             like_count=row.like_count or 0,
             dislike_count=row.dislike_count or 0,
-            score=(row.like_count or 0) - (row.dislike_count or 0),
+            score=round(float(row.score or 0), 2),
         )
         for row in rows
     ]

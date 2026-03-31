@@ -179,6 +179,26 @@ wx.chooseMedia({
 
 `GET /foods/rankings`
 
+可选查询参数：
+- `period`：`daily | weekly | all`，默认 `daily`
+- `scope`：`global | mine`，默认 `global`
+
+说明：
+- `scope=global` 时，返回全体用户范围内的排行榜统计。
+- `scope=mine` 时，返回当前登录用户自己的排行榜统计。
+- 排行榜中的 `score` 为该食物在当前 `scope + period` 过滤结果下，所有记录 `rating_level` 的平均分。
+- 当有新记录创建、旧记录删除、或记录的 `rating_level` 被修改后，`score` 会随排行榜查询结果实时变化。
+- 排行榜中的 `like_count`、`dislike_count` 也都基于当前 `scope + period` 的记录范围分别统计。
+
+响应字段说明：
+- `food_id`：食物 ID
+- `food_name`：食物名称
+- `location`：地点
+- `price`：价格
+- `like_count`：当前统计范围内 `sentiment=like` 的记录数
+- `dislike_count`：当前统计范围内 `sentiment=dislike` 的记录数
+- `score`：当前统计范围内 `rating_level` 平均分，保留两位小数
+
 ## 10. 推荐
 
 - `GET /foods/recommendations/daily`

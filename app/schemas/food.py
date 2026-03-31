@@ -80,7 +80,7 @@ class FoodRankingItem(BaseModel):
     price: Decimal
     like_count: int
     dislike_count: int
-    score: int
+    score: float
 
 
 class UserFoodStatsResponse(BaseModel):
