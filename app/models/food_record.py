@@ -16,7 +16,7 @@ class FoodRecord(Base):
     sentiment: Mapped[ReviewSentiment] = mapped_column(Enum(ReviewSentiment), nullable=False)
     rating_level: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     review_text: Mapped[str | None] = mapped_column(Text())
-    image_url: Mapped[str | None] = mapped_column(String(255))
+    image_filename: Mapped[str | None] = mapped_column(String(255))
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )

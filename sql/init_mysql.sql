@@ -1,4 +1,4 @@
-﻿CREATE DATABASE IF NOT EXISTS chilemei DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS chilemei DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE chilemei;
 
 CREATE TABLE IF NOT EXISTS users (
@@ -22,9 +22,10 @@ CREATE TABLE IF NOT EXISTS food (
     name VARCHAR(120) NOT NULL,
     location VARCHAR(255) NOT NULL,
     price DECIMAL(10, 2) NOT NULL,
-    image_url VARCHAR(255) NULL,
+    image_dir VARCHAR(255) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_food_name_location (name, location),
     INDEX idx_food_name (name),
     INDEX idx_food_location (location)
 );
@@ -36,7 +37,7 @@ CREATE TABLE IF NOT EXISTS food_records (
     sentiment ENUM('like', 'dislike') NOT NULL,
     rating_level TINYINT NOT NULL COMMENT '5:顶级, 4:夯, 3:人上人, 2:NPC, 1:拉完了',
     review_text TEXT NULL,
-    image_url VARCHAR(255) NULL,
+    image_filename VARCHAR(255) NULL,
     uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

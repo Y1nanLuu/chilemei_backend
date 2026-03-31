@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine
 
-settings.food_record_media_root.mkdir(parents=True, exist_ok=True)
+settings.food_media_root.mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager

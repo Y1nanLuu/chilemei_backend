@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     wechat_app_secret: str = ""
     wechat_code2session_url: str = "https://api.weixin.qq.com/sns/jscode2session"
     media_dir: str = "media"
-    food_record_upload_dir: str = "food_records"
+    food_upload_dir: str = "food"
     media_url_prefix: str = "/media"
 
     @property
@@ -35,12 +35,19 @@ class Settings(BaseSettings):
         )
 
     @property
-    def media_root(self) -> Path:
-        return Path(self.media_dir)
+    def project_root(self) -> Path:
+        return Path(__file__).resolve().parents[2]
 
     @property
-    def food_record_media_root(self) -> Path:
-        return self.media_root / self.food_record_upload_dir
+    def media_root(self) -> Path:
+        media_path = Path(self.media_dir)
+        if media_path.is_absolute():
+            return media_path
+        return self.project_root / media_path
+
+    @property
+    def food_media_root(self) -> Path:
+        return self.media_root / self.food_upload_dir
 
 
 @lru_cache

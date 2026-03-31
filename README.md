@@ -47,7 +47,7 @@ source sql/init_mysql.sql;
 - `WECHAT_APP_SECRET`
 - `WECHAT_CODE2SESSION_URL`
 - `MEDIA_DIR`
-- `FOOD_RECORD_UPLOAD_DIR`
+- `FOOD_UPLOAD_DIR`
 - `MEDIA_URL_PREFIX`
 
 4. 启动服务
@@ -89,21 +89,24 @@ uvicorn app.main:app --reload
 
 - `POST /api/v1/foods/upload-image`
   - 小程序通过 `wx.uploadFile` 上传图片
-  - 后端把图片保存到项目本地 `media/food_records/`
+  - 后端按食物 ID 将图片保存到项目本地 `media/food/<food_id>/`
   - 后端返回可以直接展示的 `image_url`
 
-上传成功后，再将返回的 `image_url` 传给记录创建或修改接口。
+上传成功后，再将返回的 `image_filename` 传给记录创建或修改接口；`food` 表只保存目录，`food_records` 只保存文件名。
 
 ### 食物与记录
 
 - `POST /api/v1/foods`
-  - 新建一条用户打卡记录；如果食物不存在会自动创建 `food`
+  - 新建一条用户打卡记录；支持直接传 `food_id` 绑定已有食物，或传 `food` 让后端按 `name + location` 查找/创建食物
+- `GET /api/v1/foods/search`
+  - 按食物名称搜索已存在食物，供前端下拉选择，并自动填充地点/价格等信息
 - `GET /api/v1/foods`
   - 查询记录列表，支持按食物名、位置、评价倾向、时间范围筛选
 - `GET /api/v1/foods/records/{record_id}`
 - `PUT /api/v1/foods/records/{record_id}`
 - `DELETE /api/v1/foods/records/{record_id}`
 - `POST /api/v1/foods/records/{record_id}/reuse`
+  - 返回复用草稿数据，供前端预填创建表单，不再直接创建一条重复记录
 
 ### 食物互动统计
 
@@ -115,7 +118,11 @@ uvicorn app.main:app --reload
 ### 推荐
 
 - `GET /api/v1/foods/recommendations/daily`
+  - 首页按 `food` 返回单个推荐卡片，包含 `food_id`、名称、位置、价格、评分、喜欢/劝退统计和随机封面图
 - `GET /api/v1/foods/recommendations/personalized`
+  - 首页按 `food` 返回个性化推荐列表，而不是按单条 `record` 返回
+- `GET /api/v1/foods/{food_id}/detail`
+  - 返回食物详情、全部图片、最近描述和聚合评论，供详情页使用
 
 ### 评论
 
@@ -129,16 +136,16 @@ uvicorn app.main:app --reload
 ## 图片上传流程
 
 1. 小程序选择相册或拍照后，先调用 `/api/v1/foods/upload-image`
-2. 后端保存图片到本地目录，返回 `image_url`
+2. 后端按 `food_id` 保存到对应目录；若还没有 `food_id`，上传接口会先查找或创建 food，再返回 `image_dir`、`image_filename` 和 `image_url`
 3. 小程序调用 `POST /api/v1/foods` 或 `PUT /api/v1/foods/records/{record_id}`
-4. 请求体里直接传入 `image_url`
+4. 请求体里直接传入 `image_filename`
 5. 前端展示时直接使用 `<image src="{{item.image_url}}">`
 
 ## 重要说明
 
 - `food_id` 表示食物本体，适用于互动统计、榜单、聚合分析。
-- `record_id` 表示某个用户对某个食物的一次具体记录，适用于修改、删除、评论、复用。
-- `POST /api/v1/foods` 的请求体里包含 `food` 对象和记录字段，后端会自动做“食物存在则复用，不存在则创建”。
+- `record_id` 表示某个用户对某个食物的一次具体记录，适用于修改、删除、评论、获取复用草稿。
+- `POST /api/v1/foods` 的请求体支持 `food_id` 或 `food` 二选一；传 `food` 时，后端会按 `name + location` 做“食物存在则复用，不存在则创建”。
 - `rating_level` 使用 1-5 数字表示评分。
 - 年度报告当前基于 `food_records.uploaded_at` 统计。
 - `users` 表里已经预留了 `wechat_openid` 和 `wechat_unionid` 字段，认证体系应优先围绕这两个字段设计。

@@ -59,15 +59,18 @@
 - 请使用 `multipart/form-data`。
 - 小程序端通过 `wx.uploadFile` 上传。
 - 文件字段名必须是 `file`。
-- 后端会将图片保存到本地 `media/food_records/` 目录。
-- 后端会返回 `image_url`，前端可直接渲染。
+- 如果是已有食物，表单字段传 `food_id`；如果是新食物，表单字段传 `food_name`、`location`、`price`，后端会先查找或创建 food，再按 `media/food/<food_id>/` 存图。
+- 数据库存储相对路径：`food.image_dir` 只存目录，例如 `food/12`；`food_record.image_filename` 只存文件名。
+- 接口返回的 `image_url` 为可直接渲染的相对访问路径，格式为 `/media/<image_dir>/<image_filename>`。
 
 响应示例：
 
 ```json
 {
-  "image_url": "http://127.0.0.1:8000/media/food_records/3d9f0e4a9f1b4d8f8d3f1a2b3c4d5e6f.jpg",
-  "stored_path": "media/food_records/3d9f0e4a9f1b4d8f8d3f1a2b3c4d5e6f.jpg",
+  "image_dir": "food/12",
+  "image_filename": "3d9f0e4a9f1b4d8f8d3f1a2b3c4d5e6f.jpg",
+  "image_url": "/media/food/12/3d9f0e4a9f1b4d8f8d3f1a2b3c4d5e6f.jpg",
+  "stored_path": "food/12/3d9f0e4a9f1b4d8f8d3f1a2b3c4d5e6f.jpg",
   "original_filename": "lunch.jpg"
 }
 ```
@@ -86,12 +89,15 @@ wx.chooseMedia({
       url: 'http://127.0.0.1:8000/api/v1/foods/upload-image',
       filePath: tempFilePath,
       name: 'file',
+      formData: {
+        food_id: 12,
+      },
       header: {
         Authorization: `Bearer ${token}`,
       },
       success: (uploadRes) => {
         const data = JSON.parse(uploadRes.data);
-        const imageUrl = data.image_url;
+        const imageFilename = data.image_filename;
 
         wx.request({
           url: 'http://127.0.0.1:8000/api/v1/foods',
@@ -102,15 +108,14 @@ wx.chooseMedia({
           },
           data: {
             food: {
-              name: '?????',
-              location: '?????',
+              name: '黄焖鸡米饭',
+              location: '一食堂',
               price: 18.5,
-              image_url: imageUrl,
             },
             sentiment: 'like',
             rating_level: 5,
-            review_text: '????????',
-            image_url: imageUrl,
+            review_text: '好吃',
+            image_filename: imageFilename,
           },
         });
       },
@@ -130,25 +135,48 @@ wx.chooseMedia({
 `POST /foods`
 
 说明：
-- `food` 是食物基础信息。
+- 创建记录时，`food_id` 和 `food` 二选一。
+- 如果传 `food_id`，后端直接绑定已存在的食物。
+- 如果传 `food`，后端会先按 `name + location` 查找食物；若不存在，则先创建新的 `food`，再创建 `record`。
+- `food` 在业务语义上由 `id` 唯一标识，也由 `name + location` 唯一标识。
 - `sentiment` 和 `rating_level` 是本次记录的用户评价。
 - `rating_level` 使用 `1-5` 数字。
-- `image_url` 应该传图片上传接口返回的 URL。
+- `image_filename` 应该传图片上传接口返回的文件名。
 
-请求体示例：
+配套搜索建议接口：
+
+`GET /foods/search?keyword=xxx&limit=10`
+
+说明：
+- 前端输入食物名称时，可调用该接口获取同名或近似名称的已存在食物列表。
+- 用户选择已存在食物后，可直接使用返回的 `id/name/location/price/image_dir` 进行自动填充。
+- 如果用户选择“新建食物”，则前端继续提交完整 `food` 对象即可。
+
+使用已存在食物创建记录示例：
+
+```json
+{
+  "food_id": 12,
+  "sentiment": "like",
+  "rating_level": 5,
+  "review_text": "????????",
+  "image_filename": "3d9f0e4a9f1b4d8f8d3f1a2b3c4d5e6f.jpg"
+}
+```
+
+使用新食物创建记录示例：
 
 ```json
 {
   "food": {
     "name": "?????",
     "location": "?????",
-    "price": 18.50,
-    "image_url": "http://127.0.0.1:8000/media/food_records/food-cover.jpg"
+    "price": 18.50
   },
   "sentiment": "like",
   "rating_level": 5,
   "review_text": "????????",
-  "image_url": "http://127.0.0.1:8000/media/food_records/record-photo.jpg"
+  "image_filename": "3d9f0e4a9f1b4d8f8d3f1a2b3c4d5e6f.jpg"
 }
 ```
 
@@ -169,7 +197,7 @@ wx.chooseMedia({
 - `GET /foods/records/{record_id}`
 - `PUT /foods/records/{record_id}`
 - `DELETE /foods/records/{record_id}`
-- `POST /foods/records/{record_id}/reuse`
+- `POST /foods/records/{record_id}/reuse`（返回复用草稿，不直接创建新记录）
 
 ## 8. 食物互动统计
 
@@ -186,23 +214,34 @@ wx.chooseMedia({
 说明：
 - `scope=global` 时，返回全体用户范围内的排行榜统计。
 - `scope=mine` 时，返回当前登录用户自己的排行榜统计。
-- 排行榜中的 `score` 为该食物在当前 `scope + period` 过滤结果下，所有记录 `rating_level` 的平均分。
-- 当有新记录创建、旧记录删除、或记录的 `rating_level` 被修改后，`score` 会随排行榜查询结果实时变化。
-- 排行榜中的 `like_count`、`dislike_count` 也都基于当前 `scope + period` 的记录范围分别统计。
+- 榜单接口现在返回和首页推荐一致的 `food card` 结构，前端可以复用同一套卡片组件。
+- 榜单中的 `score` 为该食物在当前 `scope + period` 过滤结果下，所有记录 `rating_level` 的平均分。
+- 榜单中的 `like_count`、`dislike_count` 也都基于当前 `scope + period` 的记录范围分别统计。
+- 榜单中的 `cover_image_url` 会从 `media/food/<food_id>/` 目录中随机选择一张图片。
+- 点击榜单卡片后，可继续调用 `GET /foods/{food_id}/detail` 获取详情页数据。
 
 响应字段说明：
 - `food_id`：食物 ID
-- `food_name`：食物名称
+- `name`：食物名称
 - `location`：地点
 - `price`：价格
+- `score`：当前统计范围内 `rating_level` 平均分，保留两位小数
 - `like_count`：当前统计范围内 `sentiment=like` 的记录数
 - `dislike_count`：当前统计范围内 `sentiment=dislike` 的记录数
-- `score`：当前统计范围内 `rating_level` 平均分，保留两位小数
+- `cover_image_url`：食物卡片封面图
 
 ## 10. 推荐
 
 - `GET /foods/recommendations/daily`
 - `GET /foods/recommendations/personalized`
+- `GET /foods/{food_id}/detail`
+
+说明：
+- 推荐接口现在以 `food` 为单位返回，而不是以 `record` 为单位。
+- 首页卡片返回 `food_id/name/location/price/score/like_count/dislike_count/cover_image_url`。
+- `cover_image_url` 会从 `media/food/<food_id>/` 目录中随机选择一张图片。
+- 详情接口返回该食物的全部图片 `image_urls`，前端可用于左右滑动展示。
+- 详情接口还会返回一个可展示的 `description`（最近一条非空评价）以及聚合后的 `comments`。
 
 ## 11. 评论
 
@@ -216,5 +255,5 @@ wx.chooseMedia({
 ## 13. 路由语义说明
 
 - `food_id`：食物实体 ID，用于榜单、互动统计、聚合分析。
-- `record_id`：用户某次打卡记录 ID，用于评论、编辑、删除、复用。
-- 前端可以先上传图片获得 `image_url`，再把 `image_url` 传给食物记录相关接口。
+- `record_id`：用户某次打卡记录 ID，用于评论、编辑、删除、获取复用草稿。
+- 前端可以先上传图片获得 `image_filename`，再把 `image_filename` 传给食物记录相关接口；展示地址由 `food.image_dir + image_filename` 组合得到。
