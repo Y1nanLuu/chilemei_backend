@@ -89,10 +89,10 @@ uvicorn app.main:app --reload
 
 - `POST /api/v1/foods/upload-image`
   - 小程序通过 `wx.uploadFile` 上传图片
-  - 后端按食物 ID 将图片保存到项目本地 `media/food/<food_id>/`
+  - 后端先将图片保存到临时目录 `media/temp/`，创建记录时再归档到 `media/food/<food_id>/`
   - 后端返回可以直接展示的 `image_url`
 
-上传成功后，再将返回的 `image_filename` 传给记录创建或修改接口；`food` 表只保存目录，`food_records` 只保存文件名。
+上传成功后，前端保留返回的临时 `image_url` 用于预览；真正创建或修改记录时只传 `image_filename`。如果用户更换图片或取消发布，应调用 `DELETE /api/v1/foods/upload-image?image_filename=...` 删除旧的临时图片。
 
 ### 食物与记录
 
@@ -136,9 +136,9 @@ uvicorn app.main:app --reload
 ## 图片上传流程
 
 1. 小程序选择相册或拍照后，先调用 `/api/v1/foods/upload-image`
-2. 后端按 `food_id` 保存到对应目录；若还没有 `food_id`，上传接口会先查找或创建 food，再返回 `image_dir`、`image_filename` 和 `image_url`
+2. 后端先把图片保存到临时目录，返回 `image_filename` 和临时 `image_url`
 3. 小程序调用 `POST /api/v1/foods` 或 `PUT /api/v1/foods/records/{record_id}`
-4. 请求体里直接传入 `image_filename`
+4. 创建记录时请求体里只传入 `image_filename`
 5. 前端展示时直接使用 `<image src="{{item.image_url}}">`
 
 ## 重要说明

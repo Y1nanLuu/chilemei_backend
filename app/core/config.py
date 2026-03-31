@@ -1,12 +1,11 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import ConfigDict
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = ConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     project_name: str = "Chilemei Backend"
     api_v1_prefix: str = "/api/v1"
@@ -24,6 +23,7 @@ class Settings(BaseSettings):
     wechat_code2session_url: str = "https://api.weixin.qq.com/sns/jscode2session"
     media_dir: str = "media"
     food_upload_dir: str = "food"
+    temp_upload_dir: str = "temp"
     media_url_prefix: str = "/media"
 
     @property
@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     @property
     def food_media_root(self) -> Path:
         return self.media_root / self.food_upload_dir
+
+    @property
+    def temp_media_root(self) -> Path:
+        return self.media_root / self.temp_upload_dir
 
 
 @lru_cache

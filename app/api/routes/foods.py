@@ -1,4 +1,4 @@
-import random
+﻿import random
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -147,6 +147,10 @@ def build_food_image_dir(food_id: int) -> str:
     return normalize_relative_path(f"{settings.food_upload_dir}/{food_id}")
 
 
+def build_temp_image_dir() -> str:
+    return normalize_relative_path(settings.temp_upload_dir)
+
+
 def build_media_url(relative_path: str) -> str:
     return f"{settings.media_url_prefix}/{normalize_relative_path(relative_path)}"
 
@@ -155,6 +159,27 @@ def build_record_relative_path(food: Food, image_filename: str | None) -> str | 
     if not food.image_dir or not image_filename:
         return None
     return normalize_relative_path(f"{food.image_dir}/{image_filename}")
+
+
+def finalize_uploaded_image(food: Food, image_filename: str | None, source_food: Food | None = None) -> None:
+    if not image_filename:
+        return
+
+    target_dir = settings.media_root / Path(food.image_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_file = target_dir / image_filename
+    if target_file.exists():
+        return
+
+    temp_file = settings.temp_media_root / image_filename
+    if temp_file.exists():
+        temp_file.replace(target_file)
+        return
+
+    if source_food and source_food.image_dir:
+        source_file = settings.media_root / Path(source_food.image_dir) / image_filename
+        if source_file.exists() and source_file != target_file:
+            source_file.replace(target_file)
 
 
 def list_food_image_urls(food: Food) -> list[str]:
@@ -171,7 +196,9 @@ def list_food_image_urls(food: Food) -> list[str]:
     return [build_media_url(normalize_relative_path(f"{food.image_dir}/{item.name}")) for item in image_paths]
 
 
-def pick_food_cover_image(food: Food) -> str | None:
+def pick_food_cover_image(food: Food | None) -> str | None:
+    if not food:
+        return None
     image_urls = list_food_image_urls(food)
     if not image_urls:
         return None
@@ -290,12 +317,7 @@ def resolve_food_for_record(
 @router.post('/upload-image', response_model=FoodImageUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_food_image(
     file: UploadFile = File(...),
-    food_id: int | None = Form(default=None),
-    food_name: str | None = Form(default=None),
-    location: str | None = Form(default=None),
-    price: Decimal | None = Form(default=None),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ) -> FoodImageUploadResponse:
     del current_user
 
@@ -305,44 +327,39 @@ async def upload_food_image(
     if file.content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Unsupported image content type')
 
-    if food_id is not None:
-        food = db.query(Food).filter(Food.id == food_id).first()
-        if not food:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Food not found')
-        food = ensure_food_image_dir(db, food)
-    else:
-        if not food_name or not location or price is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail='Provide food_id, or provide food_name, location, and price',
-            )
-        food = get_or_create_food(
-            db,
-            {'name': food_name, 'location': location, 'price': price},
-        )
-
-    target_dir = settings.media_root / Path(food.image_dir)
-    target_dir.mkdir(parents=True, exist_ok=True)
+    temp_dir = settings.temp_media_root
+    temp_dir.mkdir(parents=True, exist_ok=True)
 
     image_filename = f"{uuid4().hex}{suffix}"
-    stored_file = target_dir / image_filename
+    stored_file = temp_dir / image_filename
 
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Uploaded file is empty')
 
     stored_file.write_bytes(file_bytes)
-    db.commit()
-    relative_file_path = normalize_relative_path(f"{food.image_dir}/{image_filename}")
+    image_dir = build_temp_image_dir()
+    relative_file_path = normalize_relative_path(f"{image_dir}/{image_filename}")
 
     return FoodImageUploadResponse(
-        image_dir=food.image_dir,
+        image_dir=image_dir,
         image_filename=image_filename,
         image_url=build_media_url(relative_file_path),
         stored_path=relative_file_path,
         original_filename=file.filename or image_filename,
     )
+@router.delete('/upload-image')
+def delete_temp_uploaded_image(
+    image_filename: str = Query(..., min_length=1, max_length=255),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    del current_user
 
+    safe_name = Path(image_filename).name
+    temp_file = settings.temp_media_root / safe_name
+    if temp_file.exists() and temp_file.is_file():
+        temp_file.unlink()
+    return {'message': 'Temp image deleted'}
 
 @router.get('/search', response_model=list[FoodResponse])
 def search_foods(
@@ -379,6 +396,7 @@ def create_food_record(
     db: Session = Depends(get_db),
 ) -> FoodRecordResponse:
     food = resolve_food_for_record(db, food_id=payload.food_id, food_payload=payload.food)
+    finalize_uploaded_image(food, payload.image_filename)
     record = FoodRecord(
         user_id=current_user.id,
         food_id=food.id,
@@ -577,6 +595,7 @@ def update_food_record(
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Record not found')
 
+    source_food = record.food
     if payload.food_id is not None or payload.food is not None:
         food = resolve_food_for_record(
             db,
@@ -589,6 +608,8 @@ def update_food_record(
     update_data = payload.model_dump(exclude_unset=True, exclude={'food', 'food_id'})
     for field, value in update_data.items():
         setattr(record, field, value)
+
+    finalize_uploaded_image(record.food, record.image_filename, source_food)
 
     db.add(record)
     db.commit()
