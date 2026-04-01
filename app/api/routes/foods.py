@@ -1,16 +1,12 @@
-﻿import random
+import random
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
-from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
-from app.core.config import settings
 from app.models.comment import Comment
 from app.models.enums import ReviewSentiment
 from app.models.food import Food
@@ -20,8 +16,6 @@ from app.models.user_food_stat import UserFoodStat
 from app.schemas.food import (
     FoodDetailCommentResponse,
     FoodDetailResponse,
-    FoodImageUploadResponse,
-    FoodRankingItem,
     FoodRecommendationItem,
     FoodRecordCreate,
     FoodRecordReuseDraftResponse,
@@ -32,15 +26,14 @@ from app.schemas.food import (
 )
 from app.schemas.interaction import CommentCreate, CommentResponse, ReactionCreate
 from app.services.recommendation import get_daily_recommendation, get_personalized_recommendations
+from app.services.storage import (
+    ObjectStorageError,
+    build_food_relative_dir,
+    build_public_image_url,
+    ensure_image_in_food_dir,
+)
 
 router = APIRouter()
-ALLOWED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
-ALLOWED_IMAGE_CONTENT_TYPES = {
-    'image/jpeg',
-    'image/png',
-    'image/webp',
-    'image/gif',
-}
 
 
 def food_stats_subquery(db: Session):
@@ -120,6 +113,44 @@ def list_food_comments(db: Session, food_id: int, current_user: User, limit: int
     ]
 
 
+def list_food_image_urls(db: Session, food: Food, current_user: User) -> list[str]:
+    if not food.image_dir:
+        return []
+
+    rows = (
+        db.query(FoodRecord.image_filename)
+        .join(User, User.id == FoodRecord.user_id)
+        .filter(
+            FoodRecord.food_id == food.id,
+            FoodRecord.image_filename.isnot(None),
+            FoodRecord.image_filename != '',
+            or_(FoodRecord.user_id == current_user.id, User.is_private.is_(False)),
+        )
+        .order_by(FoodRecord.uploaded_at.desc(), FoodRecord.id.desc())
+        .all()
+    )
+
+    image_urls: list[str] = []
+    seen: set[str] = set()
+    for (image_filename,) in rows:
+        if not image_filename or image_filename in seen:
+            continue
+        seen.add(image_filename)
+        image_url = build_public_image_url(food.image_dir, image_filename)
+        if image_url:
+            image_urls.append(image_url)
+    return image_urls
+
+
+def pick_food_cover_image(db: Session, food: Food | None, current_user: User) -> str | None:
+    if not food:
+        return None
+    image_urls = list_food_image_urls(db, food, current_user)
+    if not image_urls:
+        return None
+    return random.choice(image_urls)
+
+
 def records_query(db: Session):
     stats = food_stats_subquery(db)
     return (
@@ -139,72 +170,6 @@ def normalize_food_identity(name: str, location: str) -> tuple[str, str]:
     return name.strip(), location.strip()
 
 
-def normalize_relative_path(path: str) -> str:
-    return path.replace('\\', '/').strip('/')
-
-
-def build_food_image_dir(food_id: int) -> str:
-    return normalize_relative_path(f"{settings.food_upload_dir}/{food_id}")
-
-
-def build_temp_image_dir() -> str:
-    return normalize_relative_path(settings.temp_upload_dir)
-
-
-def build_media_url(relative_path: str) -> str:
-    return f"{settings.media_url_prefix}/{normalize_relative_path(relative_path)}"
-
-
-def build_record_relative_path(food: Food, image_filename: str | None) -> str | None:
-    if not food.image_dir or not image_filename:
-        return None
-    return normalize_relative_path(f"{food.image_dir}/{image_filename}")
-
-
-def finalize_uploaded_image(food: Food, image_filename: str | None, source_food: Food | None = None) -> None:
-    if not image_filename:
-        return
-
-    target_dir = settings.media_root / Path(food.image_dir)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target_file = target_dir / image_filename
-    if target_file.exists():
-        return
-
-    temp_file = settings.temp_media_root / image_filename
-    if temp_file.exists():
-        temp_file.replace(target_file)
-        return
-
-    if source_food and source_food.image_dir:
-        source_file = settings.media_root / Path(source_food.image_dir) / image_filename
-        if source_file.exists() and source_file != target_file:
-            source_file.replace(target_file)
-
-
-def list_food_image_urls(food: Food) -> list[str]:
-    if not food.image_dir:
-        return []
-    image_dir = settings.media_root / Path(food.image_dir)
-    if not image_dir.exists() or not image_dir.is_dir():
-        return []
-    image_paths = [
-        item for item in image_dir.iterdir()
-        if item.is_file() and item.suffix.lower() in ALLOWED_IMAGE_EXTENSIONS
-    ]
-    image_paths.sort(key=lambda item: item.name)
-    return [build_media_url(normalize_relative_path(f"{food.image_dir}/{item.name}")) for item in image_paths]
-
-
-def pick_food_cover_image(food: Food | None) -> str | None:
-    if not food:
-        return None
-    image_urls = list_food_image_urls(food)
-    if not image_urls:
-        return None
-    return random.choice(image_urls)
-
-
 def serialize_food_card(db: Session, food: Food, current_user: User) -> FoodRecommendationItem:
     like_count, dislike_count = get_food_stats(db, food.id)
     return FoodRecommendationItem(
@@ -215,7 +180,7 @@ def serialize_food_card(db: Session, food: Food, current_user: User) -> FoodReco
         score=get_food_score(db, food.id, current_user),
         like_count=like_count,
         dislike_count=dislike_count,
-        cover_image_url=pick_food_cover_image(food),
+        cover_image_url=pick_food_cover_image(db, food, current_user),
     )
 
 
@@ -225,7 +190,6 @@ def serialize_record(
     like_count: int = 0,
     dislike_count: int = 0,
 ) -> FoodRecordResponse:
-    relative_path = build_record_relative_path(food, record.image_filename)
     return FoodRecordResponse(
         id=record.id,
         user_id=record.user_id,
@@ -235,7 +199,7 @@ def serialize_record(
         rating_level=record.rating_level,
         review_text=record.review_text,
         image_filename=record.image_filename,
-        image_url=build_media_url(relative_path) if relative_path else None,
+        image_url=build_public_image_url(food.image_dir, record.image_filename),
         uploaded_at=record.uploaded_at,
         like_count=like_count or 0,
         dislike_count=dislike_count or 0,
@@ -245,7 +209,7 @@ def serialize_record(
 
 
 def ensure_food_image_dir(db: Session, food: Food) -> Food:
-    image_dir = build_food_image_dir(food.id)
+    image_dir = build_food_relative_dir(food.id)
     if food.image_dir != image_dir:
         food.image_dir = image_dir
         db.add(food)
@@ -314,52 +278,18 @@ def resolve_food_for_record(
     return get_or_create_food(db, food_data)
 
 
-@router.post('/upload-image', response_model=FoodImageUploadResponse, status_code=status.HTTP_201_CREATED)
-async def upload_food_image(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
-) -> FoodImageUploadResponse:
-    del current_user
+def ensure_record_image_ready(food: Food, image_filename: str | None, source_food: Food | None = None) -> None:
+    if not image_filename:
+        return
+    try:
+        ensure_image_in_food_dir(
+            food_relative_dir=food.image_dir,
+            image_filename=image_filename,
+            source_food_relative_dir=source_food.image_dir if source_food else None,
+        )
+    except ObjectStorageError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    suffix = Path(file.filename or '').suffix.lower()
-    if suffix not in ALLOWED_IMAGE_EXTENSIONS:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Unsupported image extension')
-    if file.content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Unsupported image content type')
-
-    temp_dir = settings.temp_media_root
-    temp_dir.mkdir(parents=True, exist_ok=True)
-
-    image_filename = f"{uuid4().hex}{suffix}"
-    stored_file = temp_dir / image_filename
-
-    file_bytes = await file.read()
-    if not file_bytes:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Uploaded file is empty')
-
-    stored_file.write_bytes(file_bytes)
-    image_dir = build_temp_image_dir()
-    relative_file_path = normalize_relative_path(f"{image_dir}/{image_filename}")
-
-    return FoodImageUploadResponse(
-        image_dir=image_dir,
-        image_filename=image_filename,
-        image_url=build_media_url(relative_file_path),
-        stored_path=relative_file_path,
-        original_filename=file.filename or image_filename,
-    )
-@router.delete('/upload-image')
-def delete_temp_uploaded_image(
-    image_filename: str = Query(..., min_length=1, max_length=255),
-    current_user: User = Depends(get_current_user),
-) -> dict[str, str]:
-    del current_user
-
-    safe_name = Path(image_filename).name
-    temp_file = settings.temp_media_root / safe_name
-    if temp_file.exists() and temp_file.is_file():
-        temp_file.unlink()
-    return {'message': 'Temp image deleted'}
 
 @router.get('/search', response_model=list[FoodResponse])
 def search_foods(
@@ -396,7 +326,8 @@ def create_food_record(
     db: Session = Depends(get_db),
 ) -> FoodRecordResponse:
     food = resolve_food_for_record(db, food_id=payload.food_id, food_payload=payload.food)
-    finalize_uploaded_image(food, payload.image_filename)
+    ensure_record_image_ready(food, payload.image_filename)
+
     record = FoodRecord(
         user_id=current_user.id,
         food_id=food.id,
@@ -493,7 +424,7 @@ def get_food_detail(
     if not visible_record_exists:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Food not found')
 
-    image_urls = list_food_image_urls(food)
+    image_urls = list_food_image_urls(db, food, current_user)
     like_count, dislike_count = get_food_stats(db, food.id)
     return FoodDetailResponse(
         food_id=food.id,
@@ -532,6 +463,7 @@ def get_rankings(
             score_expr.label('score'),
         )
         .join(FoodRecord, FoodRecord.food_id == Food.id)
+        .join(User, User.id == FoodRecord.user_id)
     )
 
     now = datetime.now(timezone.utc)
@@ -542,6 +474,8 @@ def get_rankings(
 
     if scope == 'mine':
         query = query.filter(FoodRecord.user_id == current_user.id)
+    else:
+        query = query.filter(or_(FoodRecord.user_id == current_user.id, User.is_private.is_(False)))
 
     rows = (
         query.group_by(Food.id, Food.name, Food.location, Food.price)
@@ -550,6 +484,7 @@ def get_rankings(
         .all()
     )
 
+    foods = {food.id: food for food in db.query(Food).filter(Food.id.in_([row.food_id for row in rows])).all()} if rows else {}
     return [
         FoodRecommendationItem(
             food_id=row.food_id,
@@ -559,7 +494,7 @@ def get_rankings(
             score=round(float(row.score or 0), 2),
             like_count=row.like_count or 0,
             dislike_count=row.dislike_count or 0,
-            cover_image_url=pick_food_cover_image(db.query(Food).filter(Food.id == row.food_id).first()),
+            cover_image_url=pick_food_cover_image(db, foods.get(row.food_id), current_user),
         )
         for row in rows
     ]
@@ -609,7 +544,7 @@ def update_food_record(
     for field, value in update_data.items():
         setattr(record, field, value)
 
-    finalize_uploaded_image(record.food, record.image_filename, source_food)
+    ensure_record_image_ready(record.food, record.image_filename, source_food)
 
     db.add(record)
     db.commit()
@@ -649,7 +584,6 @@ def reuse_food_record(
     if source.user_id != current_user.id and source.user.is_private:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Access denied')
 
-    relative_path = build_record_relative_path(source.food, source.image_filename)
     return FoodRecordReuseDraftResponse(
         source_record_id=source.id,
         food_id=source.food_id,
@@ -658,7 +592,7 @@ def reuse_food_record(
         rating_level=source.rating_level,
         review_text=source.review_text,
         image_filename=source.image_filename,
-        image_url=build_media_url(relative_path) if relative_path else None,
+        image_url=build_public_image_url(source.food.image_dir, source.image_filename),
     )
 
 

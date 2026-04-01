@@ -8,3 +8,4 @@ passlib[bcrypt]==1.7.4
 email-validator==2.2.0
 httpx==0.28.1
 python-multipart==0.0.20
+cos-python-sdk-v5==1.9.38

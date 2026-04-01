@@ -146,11 +146,3 @@ class UserFoodStatsResponse(BaseModel):
     food_id: int
     like_count: int
     dislike_count: int
-
-
-class FoodImageUploadResponse(BaseModel):
-    image_dir: str
-    image_filename: str
-    image_url: str
-    stored_path: str
-    original_filename: str

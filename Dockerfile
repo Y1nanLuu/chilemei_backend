@@ -18,7 +18,7 @@ COPY docs ./docs
 COPY sql ./sql
 COPY README.md ./README.md
 
-RUN mkdir -p /app/media/food /app/media/temp
+# RUN mkdir -p /app/media/food /app/media/temp
 
 EXPOSE 8000
 
