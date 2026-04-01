@@ -164,8 +164,8 @@ def move_object(*, source_key: str, target_key: str, openid: str = '') -> None:
         'Bucket': settings.cos_bucket,
         'Key': target_key,
         'CopySource': copy_source,
-        'MetadataDirective': 'Replaced',
-        'Metadata': {'fileid': meta_fileid},
+        'CopyStatus': 'Replaced',
+        'Metadata': {'x-cos-meta-fileid': meta_fileid},
     }
 
     content_type = source_head.get('ContentType')
