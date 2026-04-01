@@ -148,7 +148,12 @@ def move_object(*, source_key: str, target_key: str, openid: str = '') -> None:
     if source_head is None:
         raise ObjectStorageError(f'Source object does not exist: {source_key}')
 
-    meta_fileid = _get_meta_fileid(openid=openid, object_key=target_key)
+    try:
+        meta_fileid = _get_meta_fileid(openid=openid, object_key=target_key)
+    except Exception as exc:
+        logger.exception('Failed to prepare COS metadata for target object: %s', target_key)
+        raise ObjectStorageError(f'Failed to prepare metadata for {target_key}: {exc}') from exc
+
     copy_source = {
         'Bucket': settings.cos_bucket,
         'Region': settings.cos_region,
@@ -181,9 +186,17 @@ def move_object(*, source_key: str, target_key: str, openid: str = '') -> None:
 
     try:
         client.copy_object(**copy_kwargs)
-        client.delete_object(Bucket=settings.cos_bucket, Key=source_key)
+        logger.info('Copied object from %s to %s', source_key, target_key)
     except Exception as exc:
-        raise ObjectStorageError(f'Failed to move object from {source_key} to {target_key}: {exc}') from exc
+        logger.exception('COS copy_object failed. source=%s target=%s copy_source=%s', source_key, target_key, copy_source)
+        raise ObjectStorageError(f'Failed to copy object from {source_key} to {target_key}: {exc}') from exc
+
+    try:
+        client.delete_object(Bucket=settings.cos_bucket, Key=source_key)
+        logger.info('Deleted source object after copy: %s', source_key)
+    except Exception as exc:
+        logger.exception('COS delete_object failed after successful copy. source=%s target=%s', source_key, target_key)
+        raise ObjectStorageError(f'Copied to {target_key} but failed to delete source {source_key}: {exc}') from exc
 
 
 def ensure_image_in_food_dir(
