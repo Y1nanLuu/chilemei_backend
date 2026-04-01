@@ -1,6 +1,9 @@
+import logging
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import or_
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
@@ -18,6 +21,7 @@ from app.schemas.auth import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def build_token_subject(user: User) -> str:
@@ -76,7 +80,14 @@ async def wechat_login(payload: WechatLoginRequest, db: Session = Depends(get_db
             response = await client.get(settings.wechat_code2session_url, params=params)
             response.raise_for_status()
             wx_data = response.json()
+    except ValueError as exc:
+        logger.exception('WeChat code2Session returned non-JSON response')
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail='WeChat code2Session returned an invalid response',
+        ) from exc
     except httpx.HTTPError as exc:
+        logger.exception('Failed to call WeChat code2Session API')
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail='Failed to call WeChat code2Session API',
@@ -95,33 +106,48 @@ async def wechat_login(payload: WechatLoginRequest, db: Session = Depends(get_db
     if unionid:
         filters.append(User.wechat_unionid == unionid)
 
-    user = db.query(User).filter(or_(*filters)).first()
-    is_new_user = False
+    try:
+        user = db.query(User).filter(or_(*filters)).first()
+        is_new_user = False
 
-    if not user:
-        is_new_user = True
-        nickname_suffix = openid[-6:] if len(openid) >= 6 else openid
-        user = User(
-            wechat_openid=openid,
-            wechat_unionid=unionid,
-            nickname=f'WeChatUser{nickname_suffix}',
-            is_active=True,
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    else:
-        changed = False
-        if user.wechat_openid != openid:
-            user.wechat_openid = openid
-            changed = True
-        if unionid and user.wechat_unionid != unionid:
-            user.wechat_unionid = unionid
-            changed = True
-        if changed:
+        if not user:
+            is_new_user = True
+            nickname_suffix = openid[-6:] if len(openid) >= 6 else openid
+            user = User(
+                wechat_openid=openid,
+                wechat_unionid=unionid,
+                nickname=f'WeChatUser{nickname_suffix}',
+                is_active=True,
+            )
             db.add(user)
             db.commit()
             db.refresh(user)
+        else:
+            changed = False
+            if user.wechat_openid != openid:
+                user.wechat_openid = openid
+                changed = True
+            if unionid and user.wechat_unionid != unionid:
+                user.wechat_unionid = unionid
+                changed = True
+            if changed:
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.exception('Database error during WeChat login')
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail='Database error during WeChat login',
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception('Unexpected error during WeChat login')
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail='Unexpected error during WeChat login',
+        ) from exc
 
     access_token = create_access_token(build_token_subject(user))
     return WechatLoginResponse(
