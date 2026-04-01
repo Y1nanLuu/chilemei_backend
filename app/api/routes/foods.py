@@ -278,13 +278,19 @@ def resolve_food_for_record(
     return get_or_create_food(db, food_data)
 
 
-def ensure_record_image_ready(food: Food, image_filename: str | None, source_food: Food | None = None) -> None:
+def ensure_record_image_ready(
+    food: Food,
+    image_filename: str | None,
+    current_user: User,
+    source_food: Food | None = None,
+) -> None:
     if not image_filename:
         return
     try:
         ensure_image_in_food_dir(
             food_relative_dir=food.image_dir,
             image_filename=image_filename,
+            openid=current_user.wechat_openid or '',
             source_food_relative_dir=source_food.image_dir if source_food else None,
         )
     except ObjectStorageError as exc:
@@ -326,7 +332,7 @@ def create_food_record(
     db: Session = Depends(get_db),
 ) -> FoodRecordResponse:
     food = resolve_food_for_record(db, food_id=payload.food_id, food_payload=payload.food)
-    ensure_record_image_ready(food, payload.image_filename)
+    ensure_record_image_ready(food, payload.image_filename, current_user)
 
     record = FoodRecord(
         user_id=current_user.id,
@@ -544,7 +550,7 @@ def update_food_record(
     for field, value in update_data.items():
         setattr(record, field, value)
 
-    ensure_record_image_ready(record.food, record.image_filename, source_food)
+    ensure_record_image_ready(record.food, record.image_filename, current_user, source_food)
 
     db.add(record)
     db.commit()

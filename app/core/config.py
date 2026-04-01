@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     wechat_app_id: str = ""
     wechat_app_secret: str = ""
     wechat_code2session_url: str = "https://api.weixin.qq.com/sns/jscode2session"
+    wechat_cos_getauth_url: str = "http://api.weixin.qq.com/_/cos/getauth"
+    wechat_cos_meta_encode_url: str = "https://api.weixin.qq.com/_/cos/metaid/encode"
+    storage_request_timeout: float = 10.0
     storage_root_dir: str = "media"
     food_upload_dir: str = "food"
     temp_upload_dir: str = "tmp"
