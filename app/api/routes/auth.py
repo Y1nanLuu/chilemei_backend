@@ -76,7 +76,7 @@ async def wechat_login(payload: WechatLoginRequest, db: Session = Depends(get_db
     }
 
     try:
-        async with httpx.AsyncClient(timeout=10.0, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
             response = await client.get(settings.wechat_code2session_url, params=params)
             response.raise_for_status()
             wx_data = response.json()
