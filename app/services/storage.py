@@ -38,12 +38,7 @@ def build_public_image_url(food_relative_dir: str | None, image_filename: str | 
     if not food_relative_dir or not image_filename:
         return None
     object_key = build_food_object_key(food_relative_dir, image_filename)
-    domain = settings.cos_public_domain.strip().rstrip('/')
-    if not domain:
-        return f"/{object_key}"
-    if domain.startswith('http://') or domain.startswith('https://'):
-        return f"{domain}/{object_key}"
-    return f"https://{domain}/{object_key}"
+    return f"/{object_key}"
 
 
 def _storage_http_client(*, verify: bool = True) -> httpx.Client:
