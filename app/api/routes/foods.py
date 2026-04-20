@@ -13,6 +13,7 @@ from app.models.food import Food
 from app.models.food_record import FoodRecord
 from app.models.user import User
 from app.models.user_food_stat import UserFoodStat
+from app.models.user_food_favorite import UserFoodFavorite
 from app.schemas.food import (
     FoodDetailCommentResponse,
     FoodDetailResponse,
@@ -22,6 +23,7 @@ from app.schemas.food import (
     FoodRecordResponse,
     FoodRecordUpdate,
     FoodResponse,
+    UserFoodFavoriteResponse,
     UserFoodStatsResponse,
 )
 from app.schemas.interaction import CommentCreate, CommentResponse, ReactionCreate
@@ -58,6 +60,15 @@ def get_food_stats(db: Session, food_id: int) -> tuple[int, int]:
         .first()
     )
     return (int(row[0] or 0), int(row[1] or 0)) if row else (0, 0)
+
+
+def is_food_favorited(db: Session, user_id: int, food_id: int) -> bool:
+    return (
+        db.query(UserFoodFavorite.id)
+        .filter(UserFoodFavorite.user_id == user_id, UserFoodFavorite.food_id == food_id)
+        .first()
+        is not None
+    )
 
 
 def get_food_score(db: Session, food_id: int, current_user: User | None = None) -> float:
@@ -181,6 +192,7 @@ def serialize_food_card(db: Session, food: Food, current_user: User) -> FoodReco
         like_count=like_count,
         dislike_count=dislike_count,
         cover_image_url=pick_food_cover_image(db, food, current_user),
+        is_favorited=is_food_favorited(db, current_user.id, food.id),
     )
 
 
@@ -189,6 +201,7 @@ def serialize_record(
     food: Food,
     like_count: int = 0,
     dislike_count: int = 0,
+    is_favorited: bool = False,
 ) -> FoodRecordResponse:
     return FoodRecordResponse(
         id=record.id,
@@ -203,6 +216,7 @@ def serialize_record(
         uploaded_at=record.uploaded_at,
         like_count=like_count or 0,
         dislike_count=dislike_count or 0,
+        is_favorited=is_favorited,
         created_at=record.created_at,
         updated_at=record.updated_at,
     )
@@ -349,7 +363,7 @@ def create_food_record(
     db.refresh(record)
     db.refresh(food)
     like_count, dislike_count = get_food_stats(db, food.id)
-    return serialize_record(record, food, like_count, dislike_count)
+    return serialize_record(record, food, like_count, dislike_count, is_food_favorited(db, current_user.id, food.id))
 
 
 @router.get('', response_model=list[FoodRecordResponse])
@@ -383,7 +397,7 @@ def list_food_records(
 
     rows = query.order_by(FoodRecord.uploaded_at.desc(), FoodRecord.id.desc()).all()
     return [
-        serialize_record(record, food, like_count, dislike_count)
+        serialize_record(record, food, like_count, dislike_count, is_food_favorited(db, current_user.id, food.id))
         for record, food, like_count, dislike_count in rows
     ]
 
@@ -442,6 +456,7 @@ def get_food_detail(
         dislike_count=dislike_count,
         cover_image_url=random.choice(image_urls) if image_urls else None,
         image_urls=image_urls,
+        is_favorited=is_food_favorited(db, current_user.id, food.id),
         description=get_latest_food_description(db, food.id, current_user),
         comments=list_food_comments(db, food.id, current_user),
     )
@@ -501,9 +516,70 @@ def get_rankings(
             like_count=row.like_count or 0,
             dislike_count=row.dislike_count or 0,
             cover_image_url=pick_food_cover_image(db, foods.get(row.food_id), current_user),
+            is_favorited=is_food_favorited(db, current_user.id, row.food_id),
         )
         for row in rows
     ]
+
+
+@router.get('/favorites', response_model=list[FoodRecommendationItem])
+def list_favorite_foods(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[FoodRecommendationItem]:
+    foods = (
+        db.query(Food)
+        .join(UserFoodFavorite, UserFoodFavorite.food_id == Food.id)
+        .filter(UserFoodFavorite.user_id == current_user.id)
+        .order_by(UserFoodFavorite.created_at.desc(), UserFoodFavorite.id.desc())
+        .all()
+    )
+    return [serialize_food_card(db, food, current_user) for food in foods]
+
+
+@router.post('/{food_id}/favorite', response_model=UserFoodFavoriteResponse)
+def favorite_food(
+    food_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserFoodFavoriteResponse:
+    food = db.query(Food).filter(Food.id == food_id).first()
+    if not food:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Food not found')
+
+    favorite = (
+        db.query(UserFoodFavorite)
+        .filter(UserFoodFavorite.user_id == current_user.id, UserFoodFavorite.food_id == food_id)
+        .first()
+    )
+    if not favorite:
+        favorite = UserFoodFavorite(user_id=current_user.id, food_id=food_id)
+        db.add(favorite)
+        db.commit()
+
+    return UserFoodFavoriteResponse(user_id=current_user.id, food_id=food_id, is_favorited=True)
+
+
+@router.delete('/{food_id}/favorite', response_model=UserFoodFavoriteResponse)
+def unfavorite_food(
+    food_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserFoodFavoriteResponse:
+    food = db.query(Food).filter(Food.id == food_id).first()
+    if not food:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Food not found')
+
+    favorite = (
+        db.query(UserFoodFavorite)
+        .filter(UserFoodFavorite.user_id == current_user.id, UserFoodFavorite.food_id == food_id)
+        .first()
+    )
+    if favorite:
+        db.delete(favorite)
+        db.commit()
+
+    return UserFoodFavoriteResponse(user_id=current_user.id, food_id=food_id, is_favorited=False)
 
 
 @router.get('/records/{record_id}', response_model=FoodRecordResponse)
@@ -518,7 +594,7 @@ def get_food_record(
     record, food, like_count, dislike_count = row
     if record.user_id != current_user.id and record.user.is_private:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Access denied')
-    return serialize_record(record, food, like_count, dislike_count)
+    return serialize_record(record, food, like_count, dislike_count, is_food_favorited(db, current_user.id, food.id))
 
 
 @router.put('/records/{record_id}', response_model=FoodRecordResponse)
@@ -557,7 +633,7 @@ def update_food_record(
     db.refresh(record)
     db.refresh(record.food)
     like_count, dislike_count = get_food_stats(db, record.food_id)
-    return serialize_record(record, record.food, like_count, dislike_count)
+    return serialize_record(record, record.food, like_count, dislike_count, is_food_favorited(db, current_user.id, record.food_id))
 
 
 @router.delete('/records/{record_id}')

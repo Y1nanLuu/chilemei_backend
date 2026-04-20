@@ -1,6 +1,25 @@
-﻿from datetime import datetime
+from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+GenderValue = Literal['male', 'female', 'unknown']
+GradeValue = Literal[
+    'freshman',
+    'sophomore',
+    'junior',
+    'senior',
+    'master_1',
+    'master_2',
+    'master_3',
+    'phd_1',
+    'phd_2',
+    'phd_3',
+    'phd_4',
+    'phd_5',
+    'graduated',
+]
+CampusValue = Literal['shahe', 'haidian']
 
 
 def _normalize_preference_tags(value: list[str] | None) -> list[str]:
@@ -19,9 +38,12 @@ def _normalize_preference_tags(value: list[str] | None) -> list[str]:
 
 
 class UserProfileUpdate(BaseModel):
-    nickname: str | None = Field(default=None, max_length=50)
+    nickname: str | None = Field(default=None, min_length=1, max_length=50)
     bio: str | None = Field(default=None, max_length=255)
     avatar_url: str | None = Field(default=None, max_length=255)
+    gender: GenderValue | None = None
+    grade: GradeValue | None = None
+    campus: CampusValue | None = None
 
 
 class UserPreferenceUpdate(BaseModel):
@@ -54,6 +76,9 @@ class UserProfile(BaseModel):
     nickname: str
     bio: str | None
     avatar_url: str | None
+    gender: GenderValue | None
+    grade: GradeValue | None
+    campus: CampusValue | None
     is_private: bool
     taste_preferences: list[str] = Field(default_factory=list)
     taboo_list: list[str] = Field(default_factory=list)

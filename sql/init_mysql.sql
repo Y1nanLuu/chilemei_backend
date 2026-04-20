@@ -11,6 +11,9 @@ CREATE TABLE IF NOT EXISTS users (
     nickname VARCHAR(50) NOT NULL,
     bio VARCHAR(255) NULL,
     avatar_url VARCHAR(255) NULL,
+    gender VARCHAR(20) NULL COMMENT 'male/female/unknown',
+    grade VARCHAR(20) NULL COMMENT 'freshman/sophomore/junior/senior/master_1..master_3/phd_1..phd_5/graduated',
+    campus VARCHAR(20) NULL COMMENT 'shahe/haidian',
     is_private TINYINT(1) NOT NULL DEFAULT 0,
     taste_preferences JSON NULL,
     taboo_list JSON NULL,
@@ -65,6 +68,18 @@ CREATE TABLE IF NOT EXISTS user_food_stats (
     UNIQUE KEY uk_user_food_stats_user_food (user_id, food_id),
     INDEX idx_user_food_stats_user_id (user_id),
     INDEX idx_user_food_stats_food_id (food_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_food_favorites (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    food_id BIGINT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_user_food_favorites_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_user_food_favorites_food FOREIGN KEY (food_id) REFERENCES food(id) ON DELETE RESTRICT,
+    UNIQUE KEY uk_user_food_favorites_user_food (user_id, food_id),
+    INDEX idx_user_food_favorites_user_id (user_id),
+    INDEX idx_user_food_favorites_food_id (food_id)
 );
 
 CREATE TABLE IF NOT EXISTS comments (

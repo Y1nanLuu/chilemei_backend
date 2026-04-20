@@ -82,6 +82,7 @@ class FoodRecordResponse(BaseModel):
     uploaded_at: datetime
     like_count: int = 0
     dislike_count: int = 0
+    is_favorited: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -106,6 +107,7 @@ class FoodRecommendationItem(BaseModel):
     like_count: int
     dislike_count: int
     cover_image_url: str | None
+    is_favorited: bool = False
 
 
 class FoodDetailCommentResponse(BaseModel):
@@ -127,6 +129,7 @@ class FoodDetailResponse(BaseModel):
     dislike_count: int
     cover_image_url: str | None
     image_urls: list[str]
+    is_favorited: bool = False
     description: str | None
     comments: list[FoodDetailCommentResponse]
 
@@ -146,3 +149,9 @@ class UserFoodStatsResponse(BaseModel):
     food_id: int
     like_count: int
     dislike_count: int
+
+
+class UserFoodFavoriteResponse(BaseModel):
+    user_id: int
+    food_id: int
+    is_favorited: bool

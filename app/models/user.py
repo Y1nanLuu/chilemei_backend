@@ -1,4 +1,4 @@
-﻿from datetime import datetime
+from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Integer, JSON, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -18,6 +18,9 @@ class User(Base):
     nickname: Mapped[str] = mapped_column(String(50), nullable=False)
     bio: Mapped[str | None] = mapped_column(String(255))
     avatar_url: Mapped[str | None] = mapped_column(String(255))
+    gender: Mapped[str | None] = mapped_column(String(20))
+    grade: Mapped[str | None] = mapped_column(String(20))
+    campus: Mapped[str | None] = mapped_column(String(20))
     is_private: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     taste_preferences: Mapped[list[str] | None] = mapped_column(JSON)
     taboo_list: Mapped[list[str] | None] = mapped_column(JSON)
@@ -32,4 +35,5 @@ class User(Base):
 
     food_records = relationship("FoodRecord", back_populates="user")
     food_stats = relationship("UserFoodStat", back_populates="user")
+    food_favorites = relationship("UserFoodFavorite", back_populates="user")
     comments = relationship("Comment", back_populates="user")
