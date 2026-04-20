@@ -25,3 +25,4 @@ class Food(Base):
 
     records = relationship("FoodRecord", back_populates="food")
     user_stats = relationship("UserFoodStat", back_populates="food")
+    user_favorites = relationship("UserFoodFavorite", back_populates="food")
