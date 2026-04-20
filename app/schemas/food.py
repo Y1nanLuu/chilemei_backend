@@ -114,7 +114,13 @@ class FoodDetailCommentResponse(BaseModel):
     id: int
     user_id: int
     user_nickname: str
+    user_avatar_url: str | None = None
+    avatar_url: str | None = None
     food_id: int
+    parent_comment_id: int | None = None
+    parent_user_id: int | None = None
+    parent_user_nickname: str | None = None
+    parent_user_avatar_url: str | None = None
     content: str
     created_at: datetime
 

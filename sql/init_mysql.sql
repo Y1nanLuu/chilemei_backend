@@ -86,12 +86,15 @@ CREATE TABLE IF NOT EXISTS food_comments (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     user_id BIGINT NOT NULL,
     food_id BIGINT NOT NULL,
+    parent_comment_id BIGINT NULL,
     content TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_food_comments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
     CONSTRAINT fk_food_comments_food FOREIGN KEY (food_id) REFERENCES food(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_food_comments_parent FOREIGN KEY (parent_comment_id) REFERENCES food_comments(id) ON DELETE CASCADE,
     INDEX idx_food_comments_user_id (user_id),
     INDEX idx_food_comments_food_id (food_id),
+    INDEX idx_food_comments_parent_id (parent_comment_id),
     INDEX idx_food_comments_created_at (created_at)
 );
 

@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.api.deps import get_current_user, get_db
 from app.models.comment import Comment
@@ -27,7 +27,7 @@ from app.schemas.food import (
     UserFoodFavoriteResponse,
     UserFoodStatsResponse,
 )
-from app.schemas.interaction import CommentCreate, CommentResponse, FoodCommentResponse, ReactionCreate
+from app.schemas.interaction import CommentCreate, CommentResponse, FoodCommentCreate, FoodCommentResponse, ReactionCreate
 from app.services.recommendation import get_daily_recommendation, get_personalized_recommendations
 from app.services.storage import (
     ObjectStorageError,
@@ -99,25 +99,64 @@ def get_latest_food_description(db: Session, food_id: int, current_user: User) -
     return row[0] if row else None
 
 
+def serialize_food_comment_response(
+    comment: FoodComment,
+    user_nickname: str,
+    user_avatar_url: str | None = None,
+    parent_user_id: int | None = None,
+    parent_user_nickname: str | None = None,
+    parent_user_avatar_url: str | None = None,
+    *,
+    detail: bool = False,
+) -> FoodCommentResponse | FoodDetailCommentResponse:
+    response_model = FoodDetailCommentResponse if detail else FoodCommentResponse
+    return response_model(
+        id=comment.id,
+        user_id=comment.user_id,
+        user_nickname=user_nickname,
+        user_avatar_url=user_avatar_url,
+        avatar_url=user_avatar_url,
+        food_id=comment.food_id,
+        parent_comment_id=comment.parent_comment_id,
+        parent_user_id=parent_user_id,
+        parent_user_nickname=parent_user_nickname,
+        parent_user_avatar_url=parent_user_avatar_url,
+        content=comment.content,
+        created_at=comment.created_at,
+    )
+
+
 def list_food_comments(db: Session, food_id: int, limit: int = 50) -> list[FoodDetailCommentResponse]:
+    ParentComment = aliased(FoodComment)
+    ParentUser = aliased(User)
     rows = (
-        db.query(FoodComment, User.nickname.label('user_nickname'))
+        db.query(
+            FoodComment,
+            User.nickname.label('user_nickname'),
+            User.avatar_url.label('user_avatar_url'),
+            ParentComment.user_id.label('parent_user_id'),
+            ParentUser.nickname.label('parent_user_nickname'),
+            ParentUser.avatar_url.label('parent_user_avatar_url'),
+        )
         .join(User, User.id == FoodComment.user_id)
+        .outerjoin(ParentComment, ParentComment.id == FoodComment.parent_comment_id)
+        .outerjoin(ParentUser, ParentUser.id == ParentComment.user_id)
         .filter(FoodComment.food_id == food_id)
         .order_by(FoodComment.created_at.desc(), FoodComment.id.desc())
         .limit(limit)
         .all()
     )
     return [
-        FoodDetailCommentResponse(
-            id=comment.id,
-            user_id=comment.user_id,
-            user_nickname=user_nickname,
-            food_id=comment.food_id,
-            content=comment.content,
-            created_at=comment.created_at,
+        serialize_food_comment_response(
+            comment,
+            user_nickname,
+            user_avatar_url,
+            parent_user_id,
+            parent_user_nickname,
+            parent_user_avatar_url,
+            detail=True,
         )
-        for comment, user_nickname in rows
+        for comment, user_nickname, user_avatar_url, parent_user_id, parent_user_nickname, parent_user_avatar_url in rows
     ]
 
 
@@ -522,7 +561,7 @@ def get_rankings(
 @router.post('/{food_id}/comments', response_model=FoodCommentResponse, status_code=status.HTTP_201_CREATED)
 def create_food_comment(
     food_id: int,
-    payload: CommentCreate,
+    payload: FoodCommentCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> FoodCommentResponse:
@@ -530,17 +569,40 @@ def create_food_comment(
     if not food:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Food not found')
 
-    comment = FoodComment(user_id=current_user.id, food_id=food_id, content=payload.content)
+    parent_comment: FoodComment | None = None
+    parent_user_nickname: str | None = None
+    parent_user_avatar_url: str | None = None
+    if payload.parent_comment_id is not None:
+        parent_row = (
+            db.query(
+                FoodComment,
+                User.nickname.label('user_nickname'),
+                User.avatar_url.label('user_avatar_url'),
+            )
+            .join(User, User.id == FoodComment.user_id)
+            .filter(FoodComment.id == payload.parent_comment_id, FoodComment.food_id == food_id)
+            .first()
+        )
+        if not parent_row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Parent comment not found')
+        parent_comment, parent_user_nickname, parent_user_avatar_url = parent_row
+
+    comment = FoodComment(
+        user_id=current_user.id,
+        food_id=food_id,
+        parent_comment_id=payload.parent_comment_id,
+        content=payload.content,
+    )
     db.add(comment)
     db.commit()
     db.refresh(comment)
-    return FoodCommentResponse(
-        id=comment.id,
-        user_id=comment.user_id,
-        user_nickname=current_user.nickname,
-        food_id=comment.food_id,
-        content=comment.content,
-        created_at=comment.created_at,
+    return serialize_food_comment_response(
+        comment,
+        current_user.nickname,
+        current_user.avatar_url,
+        parent_comment.user_id if parent_comment else None,
+        parent_user_nickname,
+        parent_user_avatar_url,
     )
 
 
@@ -555,23 +617,34 @@ def list_food_card_comments(
     if not food:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Food not found')
 
+    ParentComment = aliased(FoodComment)
+    ParentUser = aliased(User)
     rows = (
-        db.query(FoodComment, User.nickname.label('user_nickname'))
+        db.query(
+            FoodComment,
+            User.nickname.label('user_nickname'),
+            User.avatar_url.label('user_avatar_url'),
+            ParentComment.user_id.label('parent_user_id'),
+            ParentUser.nickname.label('parent_user_nickname'),
+            ParentUser.avatar_url.label('parent_user_avatar_url'),
+        )
         .join(User, User.id == FoodComment.user_id)
+        .outerjoin(ParentComment, ParentComment.id == FoodComment.parent_comment_id)
+        .outerjoin(ParentUser, ParentUser.id == ParentComment.user_id)
         .filter(FoodComment.food_id == food_id)
         .order_by(FoodComment.created_at.desc(), FoodComment.id.desc())
         .all()
     )
     return [
-        FoodCommentResponse(
-            id=comment.id,
-            user_id=comment.user_id,
-            user_nickname=user_nickname,
-            food_id=comment.food_id,
-            content=comment.content,
-            created_at=comment.created_at,
+        serialize_food_comment_response(
+            comment,
+            user_nickname,
+            user_avatar_url,
+            parent_user_id,
+            parent_user_nickname,
+            parent_user_avatar_url,
         )
-        for comment, user_nickname in rows
+        for comment, user_nickname, user_avatar_url, parent_user_id, parent_user_nickname, parent_user_avatar_url in rows
     ]
 
 
