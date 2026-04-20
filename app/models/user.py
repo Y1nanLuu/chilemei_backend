@@ -37,3 +37,4 @@ class User(Base):
     food_stats = relationship("UserFoodStat", back_populates="user")
     food_favorites = relationship("UserFoodFavorite", back_populates="user")
     comments = relationship("Comment", back_populates="user")
+    food_comments = relationship("FoodComment", back_populates="user")

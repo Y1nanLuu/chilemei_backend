@@ -21,3 +21,12 @@ class CommentResponse(BaseModel):
     food_record_id: int
     content: str
     created_at: datetime
+
+
+class FoodCommentResponse(BaseModel):
+    id: int
+    user_id: int
+    user_nickname: str
+    food_id: int
+    content: str
+    created_at: datetime

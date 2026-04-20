@@ -82,6 +82,19 @@ CREATE TABLE IF NOT EXISTS user_food_favorites (
     INDEX idx_user_food_favorites_food_id (food_id)
 );
 
+CREATE TABLE IF NOT EXISTS food_comments (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    food_id BIGINT NOT NULL,
+    content TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_food_comments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_food_comments_food FOREIGN KEY (food_id) REFERENCES food(id) ON DELETE RESTRICT,
+    INDEX idx_food_comments_user_id (user_id),
+    INDEX idx_food_comments_food_id (food_id),
+    INDEX idx_food_comments_created_at (created_at)
+);
+
 CREATE TABLE IF NOT EXISTS comments (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     user_id BIGINT NOT NULL,

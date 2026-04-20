@@ -114,7 +114,7 @@ class FoodDetailCommentResponse(BaseModel):
     id: int
     user_id: int
     user_nickname: str
-    food_record_id: int
+    food_id: int
     content: str
     created_at: datetime
 

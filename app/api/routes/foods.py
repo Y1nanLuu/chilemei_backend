@@ -10,6 +10,7 @@ from app.api.deps import get_current_user, get_db
 from app.models.comment import Comment
 from app.models.enums import ReviewSentiment
 from app.models.food import Food
+from app.models.food_comment import FoodComment
 from app.models.food_record import FoodRecord
 from app.models.user import User
 from app.models.user_food_stat import UserFoodStat
@@ -26,7 +27,7 @@ from app.schemas.food import (
     UserFoodFavoriteResponse,
     UserFoodStatsResponse,
 )
-from app.schemas.interaction import CommentCreate, CommentResponse, ReactionCreate
+from app.schemas.interaction import CommentCreate, CommentResponse, FoodCommentResponse, ReactionCreate
 from app.services.recommendation import get_daily_recommendation, get_personalized_recommendations
 from app.services.storage import (
     ObjectStorageError,
@@ -98,16 +99,12 @@ def get_latest_food_description(db: Session, food_id: int, current_user: User) -
     return row[0] if row else None
 
 
-def list_food_comments(db: Session, food_id: int, current_user: User, limit: int = 50) -> list[FoodDetailCommentResponse]:
+def list_food_comments(db: Session, food_id: int, limit: int = 50) -> list[FoodDetailCommentResponse]:
     rows = (
-        db.query(Comment, User.nickname.label('user_nickname'))
-        .join(User, User.id == Comment.user_id)
-        .join(FoodRecord, FoodRecord.id == Comment.food_record_id)
-        .filter(
-            FoodRecord.food_id == food_id,
-            or_(FoodRecord.user_id == current_user.id, FoodRecord.user.has(User.is_private.is_(False))),
-        )
-        .order_by(Comment.created_at.desc(), Comment.id.desc())
+        db.query(FoodComment, User.nickname.label('user_nickname'))
+        .join(User, User.id == FoodComment.user_id)
+        .filter(FoodComment.food_id == food_id)
+        .order_by(FoodComment.created_at.desc(), FoodComment.id.desc())
         .limit(limit)
         .all()
     )
@@ -116,7 +113,7 @@ def list_food_comments(db: Session, food_id: int, current_user: User, limit: int
             id=comment.id,
             user_id=comment.user_id,
             user_nickname=user_nickname,
-            food_record_id=comment.food_record_id,
+            food_id=comment.food_id,
             content=comment.content,
             created_at=comment.created_at,
         )
@@ -458,7 +455,7 @@ def get_food_detail(
         image_urls=image_urls,
         is_favorited=is_food_favorited(db, current_user.id, food.id),
         description=get_latest_food_description(db, food.id, current_user),
-        comments=list_food_comments(db, food.id, current_user),
+        comments=list_food_comments(db, food.id),
     )
 
 
@@ -519,6 +516,62 @@ def get_rankings(
             is_favorited=is_food_favorited(db, current_user.id, row.food_id),
         )
         for row in rows
+    ]
+
+
+@router.post('/{food_id}/comments', response_model=FoodCommentResponse, status_code=status.HTTP_201_CREATED)
+def create_food_comment(
+    food_id: int,
+    payload: CommentCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FoodCommentResponse:
+    food = db.query(Food).filter(Food.id == food_id).first()
+    if not food:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Food not found')
+
+    comment = FoodComment(user_id=current_user.id, food_id=food_id, content=payload.content)
+    db.add(comment)
+    db.commit()
+    db.refresh(comment)
+    return FoodCommentResponse(
+        id=comment.id,
+        user_id=comment.user_id,
+        user_nickname=current_user.nickname,
+        food_id=comment.food_id,
+        content=comment.content,
+        created_at=comment.created_at,
+    )
+
+
+@router.get('/{food_id}/comments', response_model=list[FoodCommentResponse])
+def list_food_card_comments(
+    food_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[FoodCommentResponse]:
+    del current_user
+    food = db.query(Food).filter(Food.id == food_id).first()
+    if not food:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Food not found')
+
+    rows = (
+        db.query(FoodComment, User.nickname.label('user_nickname'))
+        .join(User, User.id == FoodComment.user_id)
+        .filter(FoodComment.food_id == food_id)
+        .order_by(FoodComment.created_at.desc(), FoodComment.id.desc())
+        .all()
+    )
+    return [
+        FoodCommentResponse(
+            id=comment.id,
+            user_id=comment.user_id,
+            user_nickname=user_nickname,
+            food_id=comment.food_id,
+            content=comment.content,
+            created_at=comment.created_at,
+        )
+        for comment, user_nickname in rows
     ]
 
 
