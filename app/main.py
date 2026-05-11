@@ -44,11 +44,23 @@ def ensure_user_preference_columns() -> None:
             connection.execute(text(statement))
 
 
+def ensure_food_tag_columns() -> None:
+    statements = [
+        ('food_tags', "ALTER TABLE food ADD COLUMN food_tags JSON NULL COMMENT 'Aggregated food tags from published records'"),
+    ]
+    with engine.begin() as connection:
+        for column_name, statement in statements:
+            if _column_exists(connection, 'food', column_name):
+                continue
+            connection.execute(text(statement))
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     if settings.auto_create_tables:
         Base.metadata.create_all(bind=engine)
     ensure_user_preference_columns()
+    ensure_food_tag_columns()
     yield
 
 

@@ -1,7 +1,8 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
-from sqlalchemy import DateTime, Numeric, String, UniqueConstraint, func
+from sqlalchemy import DateTime, JSON, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -16,6 +17,7 @@ class Food(Base):
     location: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     image_dir: Mapped[str] = mapped_column(String(255))
+    food_tags: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

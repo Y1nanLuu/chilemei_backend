@@ -9,6 +9,24 @@ from app.models.enums import ReviewSentiment
 RatingLevelValue = Annotated[int, Field(ge=1, le=5)]
 
 
+class FoodTags(BaseModel):
+    taste_preferences: list[str] = Field(default_factory=list)
+    taboo_candidates: list[str] = Field(default_factory=list)
+    cuisines: list[str] = Field(default_factory=list)
+    ingredients: list[str] = Field(default_factory=list)
+    seasonings: list[str] = Field(default_factory=list)
+    cooking_methods: list[str] = Field(default_factory=list)
+    texture_tags: list[str] = Field(default_factory=list)
+    scenario_tags: list[str] = Field(default_factory=list)
+    recommendation_tags: list[str] = Field(default_factory=list)
+    chili_level: int = Field(default=0, ge=0, le=5)
+    has_chili: bool = False
+    has_sichuan_pepper: bool = False
+    delicious_level: int = Field(default=1, ge=1, le=5)
+    health_tags: list[str] = Field(default_factory=list)
+    summary: str = ''
+
+
 class FoodBase(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     location: str = Field(min_length=1, max_length=255)
@@ -33,6 +51,7 @@ class FoodResponse(BaseModel):
     location: str
     price: Decimal
     image_dir: str | None
+    food_tags: FoodTags = Field(default_factory=FoodTags)
 
 
 class FoodRecordCreate(BaseModel):
@@ -42,6 +61,7 @@ class FoodRecordCreate(BaseModel):
     rating_level: RatingLevelValue
     review_text: str | None = None
     image_filename: str | None = Field(default=None, max_length=255)
+    food_tags: FoodTags | None = None
     uploaded_at: datetime | None = None
 
     @model_validator(mode='after')
@@ -58,6 +78,7 @@ class FoodRecordUpdate(BaseModel):
     rating_level: RatingLevelValue | None = None
     review_text: str | None = None
     image_filename: str | None = Field(default=None, max_length=255)
+    food_tags: FoodTags | None = None
     uploaded_at: datetime | None = None
 
     @model_validator(mode='after')
@@ -83,6 +104,7 @@ class FoodRecordResponse(BaseModel):
     like_count: int = 0
     dislike_count: int = 0
     is_favorited: bool = False
+    food_tags: FoodTags = Field(default_factory=FoodTags)
     created_at: datetime
     updated_at: datetime
 
@@ -96,6 +118,7 @@ class FoodRecordReuseDraftResponse(BaseModel):
     review_text: str | None
     image_filename: str | None
     image_url: str | None
+    food_tags: FoodTags = Field(default_factory=FoodTags)
 
 
 class FoodRecommendationItem(BaseModel):
@@ -108,6 +131,7 @@ class FoodRecommendationItem(BaseModel):
     dislike_count: int
     cover_image_url: str | None
     is_favorited: bool = False
+    food_tags: FoodTags = Field(default_factory=FoodTags)
 
 
 class FoodDetailCommentResponse(BaseModel):
@@ -136,6 +160,7 @@ class FoodDetailResponse(BaseModel):
     cover_image_url: str | None
     image_urls: list[str]
     is_favorited: bool = False
+    food_tags: FoodTags = Field(default_factory=FoodTags)
     description: str | None
     comments: list[FoodDetailCommentResponse]
 

@@ -24,6 +24,7 @@ from app.schemas.food import (
     FoodRecordResponse,
     FoodRecordUpdate,
     FoodResponse,
+    FoodTags,
     UserFoodFavoriteResponse,
     UserFoodStatsResponse,
 )
@@ -37,6 +38,78 @@ from app.services.storage import (
 )
 
 router = APIRouter()
+
+FOOD_TAG_LIST_FIELDS = (
+    'taste_preferences',
+    'taboo_candidates',
+    'cuisines',
+    'ingredients',
+    'seasonings',
+    'cooking_methods',
+    'texture_tags',
+    'scenario_tags',
+    'recommendation_tags',
+    'health_tags',
+)
+
+
+def normalize_food_tags(food_tags: FoodTags | dict[str, Any] | None) -> dict[str, Any]:
+    if food_tags is None:
+        return FoodTags().model_dump()
+    if isinstance(food_tags, FoodTags):
+        tag_data = food_tags.model_dump()
+    else:
+        tag_data = FoodTags.model_validate(food_tags).model_dump()
+
+    for field in FOOD_TAG_LIST_FIELDS:
+        seen: set[str] = set()
+        values: list[str] = []
+        for value in tag_data.get(field) or []:
+            normalized = str(value).strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            values.append(normalized)
+        tag_data[field] = values
+    tag_data['summary'] = (tag_data.get('summary') or '').strip()
+    return tag_data
+
+
+def merge_food_tags(existing_tags: dict[str, Any] | None, incoming_tags: FoodTags | None) -> dict[str, Any] | None:
+    if incoming_tags is None:
+        return existing_tags
+
+    merged = normalize_food_tags(existing_tags)
+    incoming = normalize_food_tags(incoming_tags)
+    for field in FOOD_TAG_LIST_FIELDS:
+        seen = set(merged[field])
+        for value in incoming[field]:
+            if value in seen:
+                continue
+            merged[field].append(value)
+            seen.add(value)
+
+    merged['chili_level'] = max(int(merged.get('chili_level') or 0), int(incoming.get('chili_level') or 0))
+    merged['delicious_level'] = max(
+        int(merged.get('delicious_level') or 1),
+        int(incoming.get('delicious_level') or 1),
+    )
+    merged['has_chili'] = bool(merged.get('has_chili')) or bool(incoming.get('has_chili'))
+    merged['has_sichuan_pepper'] = bool(merged.get('has_sichuan_pepper')) or bool(incoming.get('has_sichuan_pepper'))
+    if incoming.get('summary'):
+        merged['summary'] = incoming['summary']
+    return merged
+
+
+def serialize_food_response(food: Food) -> FoodResponse:
+    return FoodResponse(
+        id=food.id,
+        name=food.name,
+        location=food.location,
+        price=food.price,
+        image_dir=food.image_dir,
+        food_tags=FoodTags.model_validate(normalize_food_tags(food.food_tags)),
+    )
 
 
 def food_stats_subquery(db: Session):
@@ -229,6 +302,7 @@ def serialize_food_card(db: Session, food: Food, current_user: User) -> FoodReco
         dislike_count=dislike_count,
         cover_image_url=pick_food_cover_image(db, food, current_user),
         is_favorited=is_food_favorited(db, current_user.id, food.id),
+        food_tags=FoodTags.model_validate(normalize_food_tags(food.food_tags)),
     )
 
 
@@ -243,7 +317,7 @@ def serialize_record(
         id=record.id,
         user_id=record.user_id,
         food_id=record.food_id,
-        food=FoodResponse.model_validate(food),
+        food=serialize_food_response(food),
         sentiment=record.sentiment,
         rating_level=record.rating_level,
         review_text=record.review_text,
@@ -253,6 +327,7 @@ def serialize_record(
         like_count=like_count or 0,
         dislike_count=dislike_count or 0,
         is_favorited=is_favorited,
+        food_tags=FoodTags.model_validate(normalize_food_tags(food.food_tags)),
         created_at=record.created_at,
         updated_at=record.updated_at,
     )
@@ -372,7 +447,7 @@ def search_foods(
         .limit(limit)
         .all()
     )
-    return [FoodResponse.model_validate(food) for food in foods]
+    return [serialize_food_response(food) for food in foods]
 
 
 @router.post('', response_model=FoodRecordResponse, status_code=status.HTTP_201_CREATED)
@@ -382,6 +457,7 @@ def create_food_record(
     db: Session = Depends(get_db),
 ) -> FoodRecordResponse:
     food = resolve_food_for_record(db, food_id=payload.food_id, food_payload=payload.food)
+    food.food_tags = merge_food_tags(food.food_tags, payload.food_tags)
     ensure_record_image_ready(food, payload.image_filename, current_user)
 
     record = FoodRecord(
@@ -394,6 +470,7 @@ def create_food_record(
     )
     if payload.uploaded_at is not None:
         record.uploaded_at = payload.uploaded_at
+    db.add(food)
     db.add(record)
     db.commit()
     db.refresh(record)
@@ -493,6 +570,7 @@ def get_food_detail(
         cover_image_url=random.choice(image_urls) if image_urls else None,
         image_urls=image_urls,
         is_favorited=is_food_favorited(db, current_user.id, food.id),
+        food_tags=FoodTags.model_validate(normalize_food_tags(food.food_tags)),
         description=get_latest_food_description(db, food.id, current_user),
         comments=list_food_comments(db, food.id),
     )
@@ -553,6 +631,9 @@ def get_rankings(
             dislike_count=row.dislike_count or 0,
             cover_image_url=pick_food_cover_image(db, foods.get(row.food_id), current_user),
             is_favorited=is_food_favorited(db, current_user.id, row.food_id),
+            food_tags=FoodTags.model_validate(
+                normalize_food_tags(foods[row.food_id].food_tags if row.food_id in foods else None)
+            ),
         )
         for row in rows
     ]
@@ -747,8 +828,11 @@ def update_food_record(
             base_food=record.food,
         )
         record.food_id = food.id
+        record.food = food
 
-    update_data = payload.model_dump(exclude_unset=True, exclude={'food', 'food_id'})
+    record.food.food_tags = merge_food_tags(record.food.food_tags, payload.food_tags)
+
+    update_data = payload.model_dump(exclude_unset=True, exclude={'food', 'food_id', 'food_tags'})
     for field, value in update_data.items():
         setattr(record, field, value)
 
@@ -795,12 +879,13 @@ def reuse_food_record(
     return FoodRecordReuseDraftResponse(
         source_record_id=source.id,
         food_id=source.food_id,
-        food=FoodResponse.model_validate(source.food),
+        food=serialize_food_response(source.food),
         sentiment=source.sentiment,
         rating_level=source.rating_level,
         review_text=source.review_text,
         image_filename=source.image_filename,
         image_url=build_public_image_url(source.food.image_dir, source.image_filename),
+        food_tags=FoodTags.model_validate(normalize_food_tags(source.food.food_tags)),
     )
 
 

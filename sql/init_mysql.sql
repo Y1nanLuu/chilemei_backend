@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS food (
     location VARCHAR(255) NOT NULL,
     price DECIMAL(10, 2) NOT NULL,
     image_dir VARCHAR(255) NULL COMMENT 'Relative media dir, e.g. food/12',
+    food_tags JSON NULL COMMENT 'Aggregated food tags from published records',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_food_name_location (name, location),
