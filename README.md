@@ -85,6 +85,8 @@ Important notes:
 - `GET /api/v1/foods`
 - `GET /api/v1/foods/recommendations/daily`
 - `GET /api/v1/foods/recommendations/personalized`
+- `GET /api/v1/foods/recommendations/guess-you-like`
+- `GET /api/v1/foods/recommendations/today`
 - `GET /api/v1/foods/{food_id}/detail`
 - `GET /api/v1/foods/rankings`
 - `GET /api/v1/foods/records/{record_id}`

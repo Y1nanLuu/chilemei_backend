@@ -29,7 +29,12 @@ from app.schemas.food import (
     UserFoodStatsResponse,
 )
 from app.schemas.interaction import CommentCreate, CommentResponse, FoodCommentCreate, FoodCommentResponse, ReactionCreate
-from app.services.recommendation import get_daily_recommendation, get_personalized_recommendations
+from app.services.recommendation import (
+    get_daily_recommendation,
+    get_guess_you_like_recommendations,
+    get_personalized_recommendations,
+    get_today_recommendations,
+)
 from app.services.storage import (
     ObjectStorageError,
     build_food_relative_dir,
@@ -526,12 +531,32 @@ def daily_recommendation(
     return serialize_food_card(db, food, current_user)
 
 
-@router.get('/recommendations/personalized', response_model=list[FoodRecommendationItem])
-def personalized_recommendation(
+@router.get('/recommendations/today', response_model=list[FoodRecommendationItem])
+def today_recommendations(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[FoodRecommendationItem]:
-    foods = get_personalized_recommendations(db, current_user)
+    foods = get_today_recommendations(db, current_user)
+    return [serialize_food_card(db, food, current_user) for food in foods]
+
+
+@router.get('/recommendations/personalized', response_model=list[FoodRecommendationItem])
+def personalized_recommendation(
+    limit: int = Query(default=10, ge=1, le=30),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[FoodRecommendationItem]:
+    foods = get_personalized_recommendations(db, current_user, limit)
+    return [serialize_food_card(db, food, current_user) for food in foods]
+
+
+@router.get('/recommendations/guess-you-like', response_model=list[FoodRecommendationItem])
+def guess_you_like_recommendations(
+    limit: int = Query(default=10, ge=1, le=30),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[FoodRecommendationItem]:
+    foods = get_guess_you_like_recommendations(db, current_user, limit)
     return [serialize_food_card(db, food, current_user) for food in foods]
 
 

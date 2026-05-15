@@ -99,13 +99,17 @@ Image upload does not go through a backend binary upload endpoint anymore.
 
 - `GET /foods/recommendations/daily`
 - `GET /foods/recommendations/personalized`
+- `GET /foods/recommendations/guess-you-like?limit=10`
+- `GET /foods/recommendations/today`
 - `GET /foods/rankings`
 - `GET /foods/{food_id}/detail`
 
-`GET /foods/recommendations/personalized` now incorporates user profile features:
+`GET /foods/recommendations/guess-you-like` is the homepage "猜你喜欢" list. It uses rule-based scoring with a larger user preference weight:
 - `taste_preferences`
 - `taboo_list`
 - `spicy_level`
+
+`GET /foods/recommendations/today` is the homepage "今日推荐" list. It returns up to four items: three hot foods and one cold or newly-added exploration item.
 
 ## 9. Comments
 
