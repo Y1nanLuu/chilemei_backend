@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from math import log1p
 from typing import Any, Iterable
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.food import Food
@@ -165,6 +165,28 @@ def _matches_taboo(food: Food, current_user: User) -> bool:
     return any(taboo.lower() in corpus for taboo in taboos)
 
 
+def _visible_record_filter(current_user: User):
+    if getattr(current_user, 'id', None) is None:
+        return User.is_private.is_(False)
+    return or_(FoodRecord.user_id == current_user.id, User.is_private.is_(False))
+
+
+def _candidate_foods(db: Session, current_user: User) -> list[Food]:
+    return (
+        db.query(Food)
+        .join(FoodRecord, FoodRecord.food_id == Food.id)
+        .join(User, User.id == FoodRecord.user_id)
+        .filter(
+            func.length(func.trim(Food.name)) > 0,
+            func.length(func.trim(Food.location)) > 0,
+            Food.price > 0,
+            _visible_record_filter(current_user),
+        )
+        .distinct()
+        .all()
+    )
+
+
 def _latest_interaction_at(food: Food, latest_record_at: datetime | None, latest_favorite_at: datetime | None) -> datetime | None:
     dates = [
         _as_utc(date)
@@ -260,7 +282,7 @@ def build_recommendation_scores(
     max_heat = _safe_max(raw_heat.values())
     max_recent = _safe_max(float(value) for value in recent_interactions.values())
 
-    foods = db.query(Food).all()
+    foods = _candidate_foods(db, current_user)
     scores: list[FoodRecommendationScore] = []
     for food in foods:
         if _matches_taboo(food, current_user):
